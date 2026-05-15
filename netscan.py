@@ -154,8 +154,8 @@ class NetScanScreen(ctk.CTkFrame):
         self._log_dpi("Capturing traffic (10s)...")
         # Capture HTTP Host, TLS SNI, DNS Query
         cmd = ("tshark -i any -a duration:10 -T fields "
-               "-e http.host -e ssl.handshake.extensions_server_name -e dns.qry.name "
-               "-Y 'http.request or ssl.handshake.type==1 or dns.flags.response==0'")
+               "-e http.host -e tls.handshake.extensions_server_name -e dns.qry.name "
+               "-Y 'http.request or tls.handshake.type==1 or dns.flags.response==0'")
         
         out, err, rc = run(cmd, timeout=15)
         
@@ -292,7 +292,13 @@ class NetScanScreen(ctk.CTkFrame):
     def _stop_capture(self):
         self._capturing = False
         if self._cap_proc:
-            self._cap_proc.terminate()
+            try:
+                # If we used sudo tcpdump, we need sudo kill to stop it cleanly
+                pid = self._cap_proc.pid
+                run(f"sudo kill {pid} 2>/dev/null")
+                self._cap_proc.terminate()
+            except Exception:
+                pass
             self._cap_proc = None
         self.cap_status.configure(text="● STOPPED", text_color=C['mu'])
 

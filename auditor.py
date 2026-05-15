@@ -90,37 +90,47 @@ class AuditorScreen(ctk.CTkFrame):
             threading.Thread(target=self._monitor_audit, daemon=True).start()
 
     def _monitor_audit(self):
-        # Tail audit.log or run ausearch -m USER_AUTH,EXECVE -ts recent -w
-        # Fallback to tailing /var/log/auth.log if auditd missing
-        cmd = "tail -f /var/log/audit/audit.log 2>/dev/null"
-        if not os.path.exists('/var/log/audit/audit.log'):
-             cmd = "tail -f /var/log/auth.log"
+        # Tail audit.log or journalctl fallback
+        if os.path.exists('/var/log/audit/audit.log'):
+            cmd = "tail -f /var/log/audit/audit.log 2>/dev/null"
+        elif os.path.exists('/var/log/auth.log'):
+            cmd = "tail -f /var/log/auth.log 2>/dev/null"
+        else:
+            # Live tail from journalctl (auth messages)
+            cmd = "journalctl -t sshd -t sudo -f 2>/dev/null"
         
         proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         while self._monitoring:
             line = proc.stdout.readline()
             if line:
-                (self.audit_log.insert('end', line) if self.winfo_exists() else None)
-                self.audit_log.see('end')
+                if self.winfo_exists():
+                    self.after(0, lambda l=line: (self.audit_log.insert('end', l), self.audit_log.see('end')))
             else:
+                if proc.poll() is not None: break
                 time.sleep(0.1)
         proc.terminate()
 
     def _analyse_logs(self):
         self.log_res.configure(text="Scanning logs...", text_color=C['ac'])
-        threading.Thread(target=self._do_log_analysis, daemon=True).start()
+        threading.Thread(target=self._do_log_analysis_bg, daemon=True).start()
 
-    def _do_log_analysis(self):
-        # Grep for failed logins, sudo abuse
-        failed, _, _ = run("grep -c 'Failed password' /var/log/auth.log")
-        sudo_fail, _, _ = run("grep -c 'sudo:.*command not found' /var/log/auth.log")
-        root_login, _, _ = run("grep -c 'session opened for user root' /var/log/auth.log")
+    def _do_log_analysis_bg(self):
+        if os.path.exists('/var/log/auth.log'):
+            failed, _, _ = run("grep -c 'Failed password' /var/log/auth.log")
+            sudo_fail, _, _ = run("grep -c 'sudo:.*command not found' /var/log/auth.log")
+            root_login, _, _ = run("grep -c 'session opened for user root' /var/log/auth.log")
+        else:
+            # Fallback to journalctl for systems without auth.log (e.g. Debian 12+)
+            f_out, _, _ = run("journalctl --since '24h ago' | grep -c 'Failed password' || echo 0")
+            s_out, _, _ = run("journalctl --since '24h ago' | grep -c 'sudo:.*command not found' || echo 0")
+            r_out, _, _ = run("journalctl --since '24h ago' | grep -c 'session opened for user root' || echo 0")
+            failed, sudo_fail, root_login = f_out.strip(), s_out.strip(), r_out.strip()
         
-        msg = (f"• Failed SSH/Login Attempts: {failed}\n"
-               f"• Failed Sudo Commands: {sudo_fail}\n"
-               f"• Root Sessions Opened: {root_login}")
+        msg = (f"• Failed SSH/Login Attempts (24h): {failed}\n"
+               f"• Failed Sudo Commands (24h): {sudo_fail}\n"
+               f"• Root Sessions Opened (24h): {root_login}")
         
-        self.log_res.configure(text=msg, text_color=C['tx'])
+        self.after(0, lambda: self.log_res.configure(text=msg, text_color=C['tx']))
 
     def _create_baseline(self):
         hashes = {}

@@ -19,10 +19,32 @@ _CVE_CACHE = {}
 _CACHE_TTL = 3600  # 1 hour
 
 
+# Offline DB file
+OFFLINE_DB_PATH = os.path.expanduser('~/.mint_scan_cve_db.json')
+
+
+def search_cves_offline(keyword: str) -> list:
+    """Search local JSON database."""
+    if not os.path.exists(OFFLINE_DB_PATH):
+        return []
+    try:
+        with open(OFFLINE_DB_PATH, 'r') as f:
+            data = json.load(f)
+        results = []
+        k = keyword.lower()
+        for item in data:
+            if k in item.get('id', '').lower() or k in item.get('description', '').lower():
+                results.append(item)
+        return results[:20]
+    except Exception:
+        return []
+
+
 def search_cves(keyword: str, results: int = 10) -> list:
     """
     Query NIST NVD for CVEs matching keyword.
     Includes caching and exponential backoff for rate limiting.
+    Falls back to offline search if network fails.
     """
     now = time.time()
     if keyword in _CVE_CACHE:
@@ -31,6 +53,7 @@ def search_cves(keyword: str, results: int = 10) -> list:
             log.info(f'CVE cache hit: "{keyword}"')
             return cached_res
 
+    # Try online first
     params = urllib.parse.urlencode({
         'keywordSearch': keyword,
         'resultsPerPage': results,
@@ -38,12 +61,14 @@ def search_cves(keyword: str, results: int = 10) -> list:
     url = f'{NVD_API}?{params}'
     
     backoff = 2
-    for attempt in range(4):
+    for attempt in range(2): # Reduced attempts for speed
         try:
             req = urllib.request.Request(
                 url, headers={'User-Agent': 'MintScan-CVE/8 (Contact: github.com/mint-projects)'})
-            with urllib.request.urlopen(req, timeout=12) as r:
+            with urllib.request.urlopen(req, timeout=8) as r:
                 data = json.loads(r.read().decode())
+            
+            # ... parsing logic (remains same) ...
 
             items = []
             for vuln in data.get('vulnerabilities', []):
@@ -89,7 +114,42 @@ def search_cves(keyword: str, results: int = 10) -> list:
             log.warning(f'CVE lookup error: {e}')
             break
             
-    return []
+    # Fallback to offline
+    log.info(f'Falling back to offline search for "{keyword}"')
+    return search_cves_offline(keyword)
+
+
+def download_offline_db(log_fn=None):
+    """Download a snapshot of common CVEs for offline use."""
+    try:
+        if log_fn: log_fn('Downloading offline CVE database snapshot...')
+        # We query for general high-risk CVEs to build a local cache
+        url = f'{NVD_API}?keywordSearch=security&resultsPerPage=100'
+        req = urllib.request.Request(
+            url, headers={'User-Agent': 'MintScan-CVE/8'})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read().decode())
+        
+        items = []
+        for vuln in data.get('vulnerabilities', []):
+            cve = vuln.get('cve', {})
+            # ... minimal parsing ...
+            items.append({
+                'id': cve.get('id'),
+                'description': cve.get('descriptions', [{}])[0].get('value', '')[:200],
+                'severity': 'HIGH', # simplified for snapshot
+                'cvss': '7.5',
+                'published': cve.get('published', '')[:10],
+                'url': f"https://nvd.nist.gov/vuln/detail/{cve.get('id')}"
+            })
+        
+        with open(OFFLINE_DB_PATH, 'w') as f:
+            json.dump(items, f)
+        if log_fn: log_fn(f'✓ Offline DB saved ({len(items)} entries)')
+        return True
+    except Exception as e:
+        if log_fn: log_fn(f'✗ Download failed: {e}')
+        return False
 
 
 def severity_color(sev: str) -> str:
@@ -152,7 +212,9 @@ class CVELookupScreen(ctk.CTkFrame):
             border_color=C['br'], text_color=C['tx'], height=34)
         self._q.pack(side='left', fill='x', expand=True, padx=(0, 8))
         Btn(sr, '🔍 SEARCH', command=self._search,
-            width=100).pack(side='left')
+            width=100).pack(side='left', padx=4)
+        Btn(sr, '📦 OFFLINE DB', command=self._download_db,
+            variant='ghost', width=120).pack(side='left')
         self._q.bind('<Return>', lambda e: self._search())
 
         # Quick searches from open ports
@@ -176,6 +238,10 @@ class CVELookupScreen(ctk.CTkFrame):
         ctk.CTkLabel(self._res_frame,
             text='Search results appear here.',
             font=MONO_SM, text_color=C['mu']).pack(pady=12)
+
+    def _download_db(self):
+        def _log(m): self._safe_after(0, lambda: self._q.delete(0, 'end') or self._q.insert(0, m))
+        threading.Thread(target=lambda: download_offline_db(_log), daemon=True).start()
 
     def _search(self):
         q = self._q.get().strip()

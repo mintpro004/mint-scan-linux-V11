@@ -163,20 +163,30 @@ class GuardianScreen(ctk.CTkFrame):
         pass
 
     def _toggle_guardian(self):
-        self._guardian_active = not self._guardian_active
-        if self._guardian_active:
-            self.status_lbl.configure(text='STATUS: ● ACTIVE', text_color=C['ok'])
-            self.toggle_btn.configure(text='DISABLE GUARDIAN', variant='danger')
+        if not self._guardian_active:
+            # Check if thread is already running to prevent duplicates
+            if self._monitor_thread and self._monitor_thread.is_alive():
+                self._guardian_active = True
+                self._refresh_ui_active()
+                return
+
+            self._guardian_active = True
+            self._refresh_ui_active()
             self._glog_line('Guardian started — monitoring system...')
             log.info('Guardian activated')
             self._monitor_thread = threading.Thread(
                 target=self._monitor_loop, daemon=True)
             self._monitor_thread.start()
         else:
+            self._guardian_active = False
             self.status_lbl.configure(text='STATUS: ○ INACTIVE', text_color=C['mu'])
             self.toggle_btn.configure(text='ENABLE GUARDIAN', variant='primary')
             self._glog_line('Guardian stopped.')
             log.info('Guardian deactivated')
+
+    def _refresh_ui_active(self):
+        self.status_lbl.configure(text='STATUS: ● ACTIVE', text_color=C['ok'])
+        self.toggle_btn.configure(text='DISABLE GUARDIAN', variant='danger')
 
     def _monitor_loop(self):
         DANGER_PORTS = {4444, 5555, 7547, 31337, 23, 2375, 1337}
@@ -194,9 +204,8 @@ class GuardianScreen(ctk.CTkFrame):
                         except Exception:
                             continue
                         if num in DANGER_PORTS:
-                            msg = f'Dangerous port {num} open!'
-                            self._glog_line(f'⚠ {msg}')
-                            critical('🚨 Guardian Alert', msg)
+                            self._fire_alert(f'port_{num}', '🚨 Guardian Alert', 
+                                           f'Dangerous port {num} open!')
 
                 # Check SSH failures
                 if self._rules.get('ssh', ctk.BooleanVar()).get():
@@ -206,9 +215,8 @@ class GuardianScreen(ctk.CTkFrame):
                     try:
                         n = int(out.strip())
                         if n >= 5:
-                            msg = f'{n} failed SSH attempts in 5 min!'
-                            self._glog_line(f'🔐 {msg}')
-                            critical('🔐 SSH Attack Detected', msg)
+                            self._fire_alert('ssh_brute', '🔐 SSH Attack Detected', 
+                                           f'{n} failed SSH attempts in 5 min!')
                     except Exception:
                         pass
 
@@ -216,9 +224,8 @@ class GuardianScreen(ctk.CTkFrame):
                 if self._rules.get('fw', ctk.BooleanVar()).get():
                     ufw, _, rc = run_cmd('ufw status 2>/dev/null | head -1')
                     if rc == 0 and 'inactive' in ufw.lower():
-                        msg = 'Firewall is inactive!'
-                        self._glog_line(f'🔥 {msg}')
-                        warning('⚠ Firewall Disabled', msg)
+                        self._fire_alert('fw_disabled', '⚠ Firewall Disabled', 
+                                       'Firewall is inactive!', level='warning')
 
                 # Check disk
                 if self._rules.get('disk', ctk.BooleanVar()).get():
@@ -226,9 +233,8 @@ class GuardianScreen(ctk.CTkFrame):
                     try:
                         pct = int(df.strip().replace('%', ''))
                         if pct >= 90:
-                            msg = f'Disk {pct}% full!'
-                            self._glog_line(f'💾 {msg}')
-                            warning('💾 Disk Nearly Full', msg)
+                            self._fire_alert('disk_full', '💾 Disk Nearly Full', 
+                                           f'Disk {pct}% full!', level='warning')
                     except Exception:
                         pass
 
@@ -241,9 +247,8 @@ class GuardianScreen(ctk.CTkFrame):
                             cmd_name = parts[10].lower()
                             for bad in BAD_PROCS:
                                 if bad in cmd_name:
-                                    msg = f'Suspicious process: {parts[10]}'
-                                    self._glog_line(f'⚠ {msg}')
-                                    critical('🦠 Malware Process', msg)
+                                    self._fire_alert(f'proc_{bad}', '🦠 Malware Process', 
+                                                   f'Suspicious process: {parts[10]}')
                                     break
 
                 self._glog_line('● Scan complete — all clear')

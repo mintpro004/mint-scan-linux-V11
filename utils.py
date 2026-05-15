@@ -659,7 +659,7 @@ SA_OPERATORS = {
 
 def analyse_phone_number(num):
     """Analyse a phone number for risk."""
-    clean = re.sub(r'[\s\-()]()', '', num)
+    clean = re.sub(r'[\s\-()]', '', num)
     risks = []
     if re.match(r'^0900', clean): risks.append('Premium rate (0900)')
     if re.match(r'^\+?1900', clean): risks.append('Premium rate (+1900)')

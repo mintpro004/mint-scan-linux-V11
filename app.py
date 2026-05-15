@@ -28,8 +28,8 @@ BOOT_LINES = [
 TAB_CATEGORIES = [
     ('HEALTH',   ['dash', 'battery', 'sysfix', 'daemon', 'updater', 'plugins', 'marketplace', 'settings']),
     ('NETWORK',  ['wifi', 'network', 'netscan', 'ports', 'wireless', 'devscan', 'webmonitor', 'vpn']),
-    ('SECURITY', ['malware', 'threats', 'guardian', 'ids', 'auditor', 'cvelookup', 'firewall', 'perms']),
-    ('TOOLS',    ['toolbox', 'investigate', 'secureerase', 'usb', 'recovery', 'terminal', 'calls', 'notifs']),
+    ('SECURITY', ['security', 'malware', 'threats', 'guardian', 'ids', 'auditor', 'cvelookup', 'firewall', 'perms']),
+    ('TOOLS',    ['live_events', 'toolbox', 'investigate', 'secureerase', 'usb', 'recovery', 'terminal', 'calls', 'notifs']),
 ]
 
 ALL_TABS = [
@@ -48,9 +48,11 @@ ALL_TABS = [
     ('devscan',     'Device Scan',  '📡'),
     ('recovery',    'Recovery',     '🗃'),
     ('netscan',     'Net Scan',     '🔬'),
+    ('security',    'Hardening',    '🛡'),
     ('malware',     'Malware',      '🦠'),
     ('sysfix',      'Sys Fix',      '🔧'),
     ('firewall',    'Firewall',     '🔥'),
+    ('live_events',  'Live Events',  '📊'),
     ('toolbox',     'Toolbox',      '🛠'),
     ('investigate', 'Investigate',  '🕵'),
     ('auditor',     'Auditor',      '⚖'),
@@ -89,6 +91,7 @@ SCREEN_MODULES = {
     'investigate': ('investigate', 'InvestigateScreen'),
     'auditor':     ('auditor',     'AuditorScreen'),
     'guardian':    ('guardian',    'GuardianScreen'),
+    'security':    ('hardening',   'HardeningScreen'),
     'settings':    ('settings',    'SettingsScreen'),
     'cvelookup':   ('cvelookup',   'CVELookupScreen'),
     'secureerase': ('secureerase', 'SecureEraseScreen'),
@@ -99,6 +102,7 @@ SCREEN_MODULES = {
     'updater':     ('updater',     'UpdaterScreen'),
     'plugins':     ('plugins',     'PluginScreen'),
     'marketplace': ('marketplace', 'MarketplaceScreen'),
+    'live_events': ('live_events', 'LiveEventsScreen'),
     'terminal':    ('terminal',    'TerminalScreen'),
 }
 
@@ -323,6 +327,7 @@ class MintScanApp:
         self.content = ctk.CTkFrame(self.container, fg_color=C['bg'], corner_radius=0)
         self.content.pack(fill='both', expand=True, side='left')
 
+        # Pre-instantiate only the first tab (dash) or keep all empty
         self._tab_btns = {}
         tab_map = {k: (lbl, icon) for k, lbl, icon in ALL_TABS}
 
@@ -349,66 +354,45 @@ class MintScanApp:
         ctk.CTkLabel(self.sidebar, text="MINT PROJECTS  •  PTY",
                      font=(FONT, 7), text_color=C['br2']).pack(side='bottom', pady=(0, 4))
 
-        for key, cls in self._screen_classes.items():
+        # Start with dashboard
+        self._switch_tab('dash')
+        self._tick_clock()
+
+    # ── TAB SWITCHING (Lazy Loading) ──────────────────────────
+
+    def _switch_tab(self, key):
+        if key not in self._screen_classes:
+            return
+
+        # Lazy instantiation
+        if key not in self._frames:
             try:
+                _log.debug(f'Lazy loading screen: {key}')
+                cls = self._screen_classes[key]
                 frame = cls(self.content, self)
                 frame.place(relwidth=1, relheight=1)
                 self._frames[key] = frame
             except Exception as e:
-                _log.warning(f'[error] {key}: {e}')
+                _log.error(f'Failed to lazy load {key}: {e}')
+                return
 
-        first = 'dash' if 'dash' in self._frames else (
-            next(iter(self._frames)) if self._frames else None)
-        if first:
-            self._switch_tab(first)
-
-        self._tick_clock()
-
-    # ── THEME REFRESH ─────────────────────────────────────────
-
-    def refresh_ui(self):
-        _log.info('refresh_ui: applying theme in-place')
-        for widget, attr, val in [
-            (self.root,      'fg_color', C['bg']),
-            (self.navbar,    'fg_color', C['sf']),
-            (self.container, 'fg_color', C['bg']),
-            (self.content,   'fg_color', C['bg']),
-            (self.sidebar,   'fg_color', C['sf']),
-        ]:
-            try: widget.configure(**{attr: val})
-            except Exception: pass
-
-        try: self.score_lbl.configure(text_color=C['ok'])
-        except Exception: pass
-        try: self.clock_lbl.configure(text_color=C['mu'])
-        except Exception: pass
-
-        for k, btn in self._tab_btns.items():
-            try:
-                active = (k == self.current_tab)
-                btn.configure(
-                    fg_color=C['acg'] if active else C['bg'],
-                    text_color=C['ac'] if active else C['mu'],
-                    hover_color=C['s2'])
-            except Exception:
-                pass
-        _log.info('refresh_ui: done')
-
-    # ── TAB SWITCHING ─────────────────────────────────────────
-
-    def _switch_tab(self, key):
-        if key not in self._frames:
-            return
         prev = self.current_tab
         if prev and prev != key and prev in self._frames:
             try:
                 self._frames[prev].on_blur()
             except AttributeError:
                 pass
-        for frame in self._frames.values():
-            frame.place_forget()
-        self._frames[key].place(relwidth=1, relheight=1)
-        self._frames[key].on_focus()
+
+        # Hide all, show active
+        for f_key, frame in self._frames.items():
+            if f_key == key:
+                frame.place(relwidth=1, relheight=1)
+                try: frame.on_focus()
+                except AttributeError: pass
+            else:
+                frame.place_forget()
+
+        # Update button styles
         for k, btn in self._tab_btns.items():
             try:
                 active = (k == key)

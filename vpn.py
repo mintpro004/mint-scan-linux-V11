@@ -300,6 +300,31 @@ class VPNScreen(ctk.CTkFrame):
             if not self.winfo_exists(): return
         except Exception: return
 
+        # Update menus
+        if wg_cfgs:
+            self._wg_menu.configure(values=wg_cfgs)
+            if self._wg_var.get() == NONE_LABEL:
+                self._wg_var.set(wg_cfgs[0])
+        else:
+            self._wg_menu.configure(values=[NONE_LABEL])
+            self._wg_var.set(NONE_LABEL)
+
+        if ov_cfgs:
+            self._ov_menu.configure(values=ov_cfgs)
+            if self._ov_var.get() == NONE_LABEL:
+                self._ov_var.set(ov_cfgs[0])
+        else:
+            self._ov_menu.configure(values=[NONE_LABEL])
+            self._ov_var.set(NONE_LABEL)
+
+        if nm_conns:
+            self._nm_menu.configure(values=nm_conns)
+            if self._nm_var.get() == NONE_LABEL:
+                self._nm_var.set(nm_conns[0])
+        else:
+            self._nm_menu.configure(values=[NONE_LABEL])
+            self._nm_var.set(NONE_LABEL)
+
         # Status
         connected = st['wireguard_active'] or st['tun_active'] or st['nm_vpn_active'] or st['ppp_active']
         if st['all_ifaces']:
@@ -307,21 +332,13 @@ class VPNScreen(ctk.CTkFrame):
             if st['nm_vpn_name']:
                 detail += f" ({st['nm_vpn_name']})"
         else:
-            detail = f"WG configs: {len(wg_cfgs)}  OVPN: {len(ov_cfgs)}  NM VPNs: {len(nm_conns)}"
+            detail = f"Discovered: {len(wg_cfgs)} WG, {len(ov_cfgs)} OVPN, {len(nm_conns)} NM"
 
         self._stat_lbl.configure(
             text='🔒 CONNECTED' if connected else '⚠ NOT CONNECTED',
             text_color=C['ok'] if connected else C['wn'])
         self._stat_info.configure(text=detail)
 
-        # Previously connected networks (NM connection history)
-        from utils import get_saved_wifi_networks
-        saved = get_saved_wifi_networks()
-        if saved:
-            self._ulog(f"Detected {len(saved)} saved network profile(s).")
-            for s in saved[:5]:
-                self._ulog(f"  • {s['name']} (Last: {s['last']})")
-        
         # Tool status
         tool_parts = []
         for name, ok in tools.items():
@@ -345,34 +362,57 @@ class VPNScreen(ctk.CTkFrame):
         val = self._wg_var.get()
         if val == NONE_LABEL or not val:
             return None
-        return os.path.basename(val).replace('.conf','')
+        # Return filename without extension as interface name
+        return os.path.splitext(os.path.basename(val))[0]
 
     def _wg_up(self):
-        iface = self._get_wg_iface()
-        if not iface:
+        conf = self._wg_var.get()
+        if not conf or conf == NONE_LABEL:
             self._ulog('No WireGuard config selected.')
             return
         
-        # Validation
+        iface = self._get_wg_iface()
         if not re.match(r'^[a-zA-Z0-9.\-_]+$', iface):
             self._ulog(f'✗ Invalid interface name: {iface}')
             return
 
-        conf = self._wg_var.get()
         self._ulog(f'Starting WireGuard: {iface}')
         def _bg():
             if not shutil.which('wg-quick'):
                 self._safe_after(0, self._ulog, '✗ wg-quick missing')
                 return
             
+            is_cros = _is_crostini()
             target = f'/etc/wireguard/{iface}.conf'
-            if os.path.exists(conf) and not os.path.exists(target):
-                # We still need to chain commands, but we can do it more safely
-                # Or just run them one by one
-                run_cmd(['sudo', 'mkdir', '-p', '/etc/wireguard'])
-                run_cmd(['sudo', 'cp', conf, target])
-                run_cmd(['sudo', 'chmod', '600', target])
             
+            # Optimized settings for system
+            try:
+                if os.path.exists(conf):
+                    with open(conf, 'r') as f:
+                        lines = f.readlines()
+                    
+                    # Add MTU optimization for Crostini/Virtualization
+                    if is_cros and not any('MTU' in l for l in lines):
+                        self._ulog('Optimizing MTU for Chromebook...')
+                        # Insert MTU under [Interface]
+                        new_lines = []
+                        for line in lines:
+                            new_lines.append(line)
+                            if '[Interface]' in line:
+                                new_lines.append('MTU = 1420\n')
+                        lines = new_lines
+
+                    # Copy to /etc/wireguard (required by wg-quick)
+                    run_cmd(['sudo', 'mkdir', '-p', '/etc/wireguard'])
+                    tmp_conf = f'/tmp/{iface}.conf'
+                    with open(tmp_conf, 'w') as f:
+                        f.writelines(lines)
+                    run_cmd(['sudo', 'cp', tmp_conf, target])
+                    run_cmd(['sudo', 'chmod', '600', target])
+                    os.remove(tmp_conf)
+            except Exception as e:
+                self._ulog(f'⚠ Optimization error: {e}')
+
             out, err, rc = run_cmd(['sudo', 'wg-quick', 'up', iface], timeout=30)
             self._safe_after(0, self._ulog, ('✓ Connected' if rc==0 else f'✗ Failed: {err or out}'))
             self._safe_after(800, lambda: threading.Thread(target=self._bg_refresh, daemon=True).start())
@@ -402,12 +442,20 @@ class VPNScreen(ctk.CTkFrame):
         conf = self._ov_var.get()
         if conf == NONE_LABEL or not conf: return
         self._ulog(f'Connecting OpenVPN: {os.path.basename(conf)}')
+        
         def _bg():
+            is_cros = _is_crostini()
             cmd = [
                 'sudo', 'openvpn', '--config', conf, '--daemon',
                 '--log', '/tmp/mint_scan_openvpn.log',
                 '--writepid', '/tmp/mint_scan_ov.pid'
             ]
+            
+            # Optimized settings for Crostini
+            if is_cros:
+                self._ulog('Applying Crostini tunnel optimizations...')
+                cmd.extend(['--mssfix', '1300', '--tun-mtu', '1400'])
+                
             out, err, rc = run_cmd(cmd, timeout=20)
             self._safe_after(0, self._ulog, '✓ OpenVPN started' if rc==0 else f'✗ {err or out}')
             self._safe_after(500, lambda: threading.Thread(target=self._bg_refresh, daemon=True).start())
