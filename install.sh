@@ -92,17 +92,37 @@ fi
 
 # ── [4/9] Python Environment ─────────────────────────────────────
 echo "[4/9] Setting up Python environment..."
-[ ! -d "venv" ] && python3 -m venv venv
-source venv/bin/activate
-pip install -q --upgrade pip
+# Ensure python3-venv is available (apt should have installed it in step 2)
+if [ ! -d "venv" ]; then
+    python3 -m venv venv || {
+        echo -e "  ${RED}✗ Failed to create venv. Trying with --system-site-packages...${NC}"
+        python3 -m venv --system-site-packages venv
+    }
+fi
+
+if [ ! -f "venv/bin/activate" ]; then
+    echo -e "  ${RED}✗ Virtual environment creation failed. Permissions issue?${NC}"
+    echo -e "  Attempting to fix permissions and retry..."
+    sudo chown -R "$USER:$USER" "$SCRIPT_DIR"
+    python3 -m venv venv
+fi
+
+source venv/bin/activate || {
+    echo -e "  ${RED}✗ Could not activate venv. Aborting.${NC}"
+    exit 1
+}
+
+# Upgrade pip inside venv
+pip install -q --upgrade pip 2>/dev/null || pip install --upgrade pip --break-system-packages 2>/dev/null || true
 echo "  ✓ Virtualenv ready"
 
 # ── [5/9] Python Dependencies ────────────────────────────────────
 echo "[5/9] Installing Python modules..."
 if [ -f "requirements.txt" ]; then
-    pip install -q -r requirements.txt || pip install -r requirements.txt
+    pip install -q -r requirements.txt || pip install -r requirements.txt || pip install -r requirements.txt --break-system-packages
 else
-    pip install -q customtkinter==5.2.2 darkdetect psutil pillow qrcode pycryptodome requests netifaces speedtest-cli pystray plyer reportlab
+    MODS="customtkinter==5.2.2 darkdetect psutil pillow qrcode pycryptodome requests netifaces speedtest-cli pystray plyer reportlab"
+    pip install -q $MODS || pip install $MODS || pip install $MODS --break-system-packages
 fi
 echo "  ✓ Done"
 

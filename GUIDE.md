@@ -8,8 +8,9 @@
 <p>Mint Scan is designed to run on Debian-based distributions, including Ubuntu, Kali Linux, and ChromeOS (Crostini).</p>
 
 <pre style="background-color: #f8f9fa; color: #333; padding: 15px; border-radius: 5px; border: 1px solid #ddd;">
-git clone https://github.com/mintpro004/mint-scan-linux-V11.git ~/mint-scan-linux
-cd ~/mint-scan-linux
+# Do NOT use sudo for cloning
+git clone https://github.com/mintpro004/mint-scan-linux-V11.git
+cd mint-scan-linux-V11
 bash install.sh
 bash run.sh
 </pre>
