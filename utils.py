@@ -14,13 +14,17 @@ _log = _get_logger("utils")
 from widgets import C, MONO, MONO_SM, MONO_LG, MONO_XL
 
 
+_SUDO_AVAILABLE = True
+
 def run_cmd(cmd, timeout=8):
     """
     Run a command safely.
     - If 'cmd' is a list: runs with shell=False (SECURE).
     - If 'cmd' is a string: runs with shell=True (LEGACY/INSECURE).
     Uses sudo -n (non-interactive) to prevent hanging on password prompts.
+    Returns: (stdout, stderr, returncode)
     """
+    global _SUDO_AVAILABLE
     original_cmd = cmd if isinstance(cmd, str) else " ".join(cmd)
     is_shell = isinstance(cmd, str)
 
@@ -31,7 +35,10 @@ def run_cmd(cmd, timeout=8):
             inner_q = inner.replace("'", "'\\''")
             # In Crostini/Chromebook, sudo -n often works. On others, it might fail.
             # We try to use sudo -n only if we've already confirmed it works elsewhere or just try it.
-            cmd = f"sudo -n bash -c '{inner_q}' 2>/dev/null || bash -c '{inner_q}'"
+            if _SUDO_AVAILABLE:
+                cmd = f"sudo -n bash -c '{inner_q}' 2>/dev/null || bash -c '{inner_q}'"
+            else:
+                cmd = f"bash -c '{inner_q}'"
         elif not is_shell and cmd[0] == 'sudo':
             # For lists, we try with -n but handle failure
             pass
@@ -44,14 +51,15 @@ def run_cmd(cmd, timeout=8):
         # If we use a list and sudo, and we aren't root, try -n
         actual_cmd = cmd
         if not is_shell and cmd[0] == 'sudo' and os.getuid() != 0:
-             # Try with -n first
-             try:
-                 r = subprocess.run(['sudo', '-n'] + cmd[1:], capture_output=True, text=True, timeout=timeout, env=run_env)
-                 if r.returncode == 0:
-                     return r.stdout.strip(), r.stderr.strip(), 0
-             except:
-                 pass
-             # Fallback to no sudo or just fail silently if sudo required
+             if _SUDO_AVAILABLE:
+                 try:
+                     r = subprocess.run(['sudo', '-n'] + cmd[1:], capture_output=True, text=True, timeout=timeout, env=run_env)
+                     if r.returncode == 0:
+                         return r.stdout.strip(), r.stderr.strip(), 0
+                     elif r.returncode == 1 and 'sudo: a password is required' in r.stderr.lower():
+                         _SUDO_AVAILABLE = False
+                 except:
+                     pass
              actual_cmd = cmd[1:]
 
         r = subprocess.run(
@@ -61,6 +69,17 @@ def run_cmd(cmd, timeout=8):
         stdout = r.stdout.strip() if r.stdout else ""
         stderr = r.stderr.strip() if r.stderr else ""
         
+        # Check if we failed due to sudo permissions in a shell command
+        if is_shell and "sudo: a password is required" in stderr.lower():
+            _SUDO_AVAILABLE = False
+            # Re-run without sudo if it was prefixed with sudo
+            if original_cmd.strip().startswith('sudo '):
+                inner = original_cmd.strip()[5:].strip()
+                r = subprocess.run(inner, shell=True, capture_output=True, text=True, timeout=timeout, env=run_env)
+                stdout = r.stdout.strip() if r.stdout else ""
+                stderr = r.stderr.strip() if r.stderr else ""
+                return stdout, stderr + "\n[SUDO REQUIRED]", r.returncode
+
         return stdout, stderr, r.returncode
 
     except subprocess.TimeoutExpired:
@@ -631,6 +650,70 @@ def get_open_ports():
 
 def check_root():
     return os.geteuid() == 0
+
+
+def get_dependencies_status():
+    """Check if required system tools are installed."""
+    # List from install.sh
+    tools = [
+        ('python3', 'Python 3 Interpreter'),
+        ('pip3',    'Python Package Manager'),
+        ('git',     'Version Control'),
+        ('rg',      'Ripgrep (Fast Search)'),
+        ('adb',     'Android Debug Bridge'),
+        ('nmap',    'Network Scanner'),
+        ('ufw',     'Uncomplicated Firewall'),
+        ('xclip',   'Clipboard Utility'),
+        ('iw',      'Wireless Tools'),
+        ('nmcli',   'Network Manager CLI'),
+        ('ss',      'Socket Statistics (iproute2)'),
+        ('dbus-send', 'D-Bus Messaging'),
+    ]
+    status = []
+    for cmd, desc in tools:
+        found = shutil.which(cmd) is not None
+        status.append({'cmd': cmd, 'desc': desc, 'found': found})
+    return status
+
+
+def install_missing_dependencies():
+    """Attempt to install missing packages based on PM."""
+    pm = None
+    if shutil.which('apt-get'): pm = 'apt'
+    elif shutil.which('dnf'): pm = 'dnf'
+    elif shutil.which('pacman'): pm = 'pacman'
+    
+    if not pm:
+        return False, "No supported package manager found."
+    
+    missing = [s['cmd'] for s in get_dependencies_status() if not s['found']]
+    if not missing:
+        return True, "All dependencies already installed."
+    
+    # Map command names to package names if different
+    pkg_map = {
+        'rg': 'ripgrep',
+        'adb': 'adb' if pm == 'apt' else 'android-tools',
+        'xclip': 'xclip',
+        'iw': 'iw',
+        'ss': 'iproute2' if pm == 'apt' else 'iproute',
+        'dbus-send': 'dbus',
+    }
+    
+    to_install = []
+    for cmd in missing:
+        to_install.append(pkg_map.get(cmd, cmd))
+    
+    pkgs = " ".join(to_install)
+    if pm == 'apt':
+        cmd = f"sudo DEBIAN_FRONTEND=noninteractive apt-get install -y {pkgs}"
+    elif pm == 'dnf':
+        cmd = f"sudo dnf install -y {pkgs}"
+    elif pm == 'pacman':
+        cmd = f"sudo pacman -S --noconfirm --needed {pkgs}"
+        
+    out, err, rc = run_cmd(cmd, timeout=300)
+    return rc == 0, out or err
 
 
 def get_active_connections():

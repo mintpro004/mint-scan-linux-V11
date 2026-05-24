@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — Centralised Logging
+Mint Scan v11.1 — Centralised Logging
 Replaces all print() statements with structured logging to file + GUI.
 All modules import: from logger import log, LOG_FILE
 """

@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — Main Application
+Mint Scan v11.1 Ultra Professional — Main Application
 Industry-standard architecture:
 - Non-destructive theme refresh (no frame rebuilds)
 - Lazy screen loading (screens only built when first visited)
@@ -12,32 +12,35 @@ import threading, time, sys, os, json
 
 from widgets import C, apply_theme, ScrollableFrame, MONO, MONO_SM, FONT
 from logger import get_logger as _gl
+from version import VERSION
+from database import db
 _log = _gl('app')
 
-VERSION = '8.3.0'
-
 BOOT_LINES = [
-    "INITIALISING MINT SCAN v8.3.0...",
+    f"INITIALISING MINT SCAN v{VERSION}...",
     "LOADING SECURITY MODULES...",
     "PROBING NETWORK INTERFACES...",
     "LOADING THREAT ENGINE + IDS...",
     "STARTING BACKGROUND SERVICES...",
-    "✓ ALL SYSTEMS READY — v8.3.0",
+    f"✓ ALL SYSTEMS READY — v{VERSION}",
 ]
 
 TAB_CATEGORIES = [
     ('HEALTH',   ['dash', 'battery', 'sysfix', 'daemon', 'updater', 'plugins', 'marketplace', 'settings']),
-    ('NETWORK',  ['wifi', 'network', 'netscan', 'ports', 'wireless', 'devscan', 'webmonitor', 'vpn']),
+    ('NETWORK',  ['wifi', 'network', 'netmap', 'netscan', 'ports', 'wireless', 'devscan', 'webmonitor', 'vpn']),
     ('SECURITY', ['security', 'malware', 'threats', 'guardian', 'ids', 'auditor', 'cvelookup', 'firewall', 'perms']),
-    ('TOOLS',    ['live_events', 'toolbox', 'investigate', 'secureerase', 'usb', 'recovery', 'terminal', 'calls', 'notifs']),
+    ('TOOLS',    ['live_events', 'visualizer', 'toolbox', 'investigate', 'secureerase', 'usb', 'recovery', 'terminal', 'calls', 'notifs']),
+    ('SUPPORT',  ['help']),
 ]
 
 ALL_TABS = [
+    ('posture',    'Posture',      '🛡'),
     ('dash',        'Dashboard',    '⬡'),
     ('perms',       'Permissions',  '🔑'),
     ('wifi',        'Wi-Fi',        '📶'),
     ('calls',       'Calls',        '📞'),
     ('network',     'Network',      '📡'),
+    ('netmap',      'Net Map',      '🕸'),
     ('battery',     'Battery',      '🔋'),
     ('threats',     'Threats',      '⚠'),
     ('guardian',    'Guardian',     '🛡'),
@@ -53,6 +56,7 @@ ALL_TABS = [
     ('sysfix',      'Sys Fix',      '🔧'),
     ('firewall',    'Firewall',     '🔥'),
     ('live_events',  'Live Events',  '📊'),
+    ('visualizer',  'Visualizer',   '🌐'),
     ('toolbox',     'Toolbox',      '🛠'),
     ('investigate', 'Investigate',  '🕵'),
     ('auditor',     'Auditor',      '⚖'),
@@ -67,14 +71,17 @@ ALL_TABS = [
     ('marketplace', 'Marketplace',  '🛍'),
     ('terminal',    'Terminal',     '>_'),
     ('settings',    'Settings',     '⚙'),
+    ('help',        'Help',         '❓'),
 ]
 
 SCREEN_MODULES = {
+    'posture':     ('posture',     'PostureScreen'),
     'dash':        ('dash',        'DashScreen'),
     'perms':       ('perms',       'PermsScreen'),
     'wifi':        ('wifi',        'WifiScreen'),
     'calls':       ('calls',       'CallsScreen'),
     'network':     ('network',     'NetworkScreen'),
+    'netmap':      ('netmap',      'NetworkMapScreen'),
     'battery':     ('battery',     'BatteryScreen'),
     'threats':     ('threats',     'ThreatsScreen'),
     'notifs':      ('notifs',      'NotifsScreen'),
@@ -103,14 +110,16 @@ SCREEN_MODULES = {
     'plugins':     ('plugins',     'PluginScreen'),
     'marketplace': ('marketplace', 'MarketplaceScreen'),
     'live_events': ('live_events', 'LiveEventsScreen'),
+    'visualizer':  ('visualizer',  'VisualizerScreen'),
     'terminal':    ('terminal',    'TerminalScreen'),
+    'help':        ('help',        'HelpScreen'),
 }
 
 
 class MintScanApp:
     def __init__(self):
         self.root = ctk.CTk()
-        self.root.title("Mint Scan v8")
+        self.root.title("Mint Scan v11.1 Ultra Professional")
         self.root.geometry("1140x740")
         self.root.minsize(920, 620)
         self.root.configure(fg_color=C['bg'])
@@ -126,12 +135,22 @@ class MintScanApp:
         except Exception:
             pass
 
-        self.current_tab = 'dash'
+        self.current_tab = 'posture'
         self._frames    = {}
         self._tab_btns  = {}
         self._screen_classes = {}
 
+        self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
         self._show_boot()
+
+    def _on_closing(self):
+        _log.info("Application closing...")
+        try:
+            db.close()
+        except Exception as e:
+            _log.error(f"Error closing database: {e}")
+        self.root.destroy()
+        sys.exit(0)
 
     # ── BOOT ──────────────────────────────────────────────────
 
@@ -178,7 +197,7 @@ class MintScanApp:
     def _show_welcome(self):
         from widgets import Btn, Card
         pop = ctk.CTkToplevel(self.root)
-        pop.title("Welcome to Mint Scan v8")
+        pop.title("Welcome to Mint Scan v11.1 Ultra Professional")
         pop.geometry("620x500")
         pop.configure(fg_color=C['bg'])
         pop.attributes('-topmost', True)
@@ -194,18 +213,18 @@ class MintScanApp:
         inner = ctk.CTkFrame(pop, fg_color='transparent')
         inner.pack(fill='both', expand=True, padx=30, pady=30)
         
-        ctk.CTkLabel(inner, text="[ MINT SCAN ]", font=(FONT, 32, 'bold'), text_color=C['ac']).pack(pady=(0,5))
-        ctk.CTkLabel(inner, text=f"Version {VERSION} — Global Security Suite", font=(FONT, 12), text_color=C['mu']).pack()
+        ctk.CTkLabel(inner, text="[ MINT SCAN v11.1 ]", font=(FONT, 32, 'bold'), text_color=C['ac']).pack(pady=(0,5))
+        ctk.CTkLabel(inner, text=f"Version {VERSION} — Ultra Professional Security Suite", font=(FONT, 12), text_color=C['mu']).pack()
         ctk.CTkLabel(inner, text="DEVELOPED BY MINT PROJECTS PTY (LTD)", font=(FONT, 9, 'bold'), text_color=C['bl']).pack(pady=(10,15))
         
         msg = (
-            "Welcome to the most advanced security auditor for Linux.\n\n"
-            "• Industry-standard Malware Scanning (ClamAV)\n"
-            "• Real-time Intrusion Detection (Suricata/Snort)\n"
-            "• Live CVE Vulnerability Lookups (NIST NVD)\n"
-            "• Secure VPN Client & Wireless Sync Server\n"
-            "• Comprehensive System Hardening & Repair\n\n"
-            "Your system is currently being scanned in the background."
+            "Welcome to the Ultra Professional edition of Mint Scan.\n\n"
+            "• Enterprise-Grade Malware Scanning & Removal\n"
+            "• Proactive Intrusion Prevention System (IPS)\n"
+            "• Real-time Vulnerability Intelligence via NIST\n"
+            "• Military-Grade VPN & Secure Wireless Tunneling\n"
+            "• Automated System Hardening & Compliance Audits\n\n"
+            "Your professional security baseline is being established."
         )
         
         info_card = Card(inner, accent=C['ac'])
@@ -239,7 +258,7 @@ class MintScanApp:
     # ── BACKGROUND SERVICES ───────────────────────────────────
 
     def _start_services(self):
-        _log.info('Mint Scan v8 started')
+        _log.info('Mint Scan v11.1 started')
 
         def _tray():
             try:
@@ -265,7 +284,7 @@ class MintScanApp:
             try:
                 from plugins import load_all, broadcast_event
                 results = load_all()
-                broadcast_event('app_start', {'version': '8.3.0'})
+                broadcast_event('app_start', {'version': '11.1.0'})
                 _log.info(f'Plugins: {len(results)} loaded')
             except Exception as e:
                 _log.debug(f'Plugins: {e}')
@@ -305,7 +324,7 @@ class MintScanApp:
         logo_frame.pack(side='left', padx=16)
         ctk.CTkLabel(logo_frame, text="[ MINT SCAN ]",
                      font=(FONT, 14, 'bold'), text_color=C['ac']).pack(side='left')
-        ctk.CTkLabel(logo_frame, text=" v8",
+        ctk.CTkLabel(logo_frame, text=" v11.1",
                      font=(FONT, 9), text_color=C['mu']).pack(side='left', pady=(4, 0))
 
         self.clock_lbl = ctk.CTkLabel(self.navbar, text="--:--:--",
@@ -357,6 +376,49 @@ class MintScanApp:
         # Start with dashboard
         self._switch_tab('dash')
         self._tick_clock()
+
+    # ── THEME REFRESH ─────────────────────────────────────────
+
+    def refresh_ui(self):
+        _log.info('refresh_ui: applying theme in-place')
+        # Update main containers
+        for widget, attr, val in [
+            (self.root,      'fg_color', C['bg']),
+            (self.navbar,    'fg_color', C['sf']),
+            (self.container, 'fg_color', C['bg']),
+            (self.content,   'fg_color', C['bg']),
+            (self.sidebar,   'fg_color', C['sf']),
+        ]:
+            try: widget.configure(**{attr: val})
+            except Exception: pass
+
+        try: self.score_lbl.configure(text_color=C['ok'])
+        except Exception: pass
+        try: self.clock_lbl.configure(text_color=C['mu'])
+        except Exception: pass
+
+        # Update sidebar buttons
+        for k, btn in self._tab_btns.items():
+            try:
+                active = (k == self.current_tab)
+                btn.configure(
+                    fg_color=C['acg'] if active else C['bg'],
+                    text_color=C['ac'] if active else C['mu'],
+                    hover_color=C['s2'])
+            except Exception: pass
+
+        # Recursively update any active/loaded screens if they support it
+        for frame in self._frames.values():
+            try:
+                # If the screen has its own theme refresh logic
+                if hasattr(frame, 'refresh_theme'):
+                    frame.refresh_theme()
+                else:
+                    # Generic background update
+                    frame.configure(fg_color=C['bg'])
+            except Exception: pass
+            
+        _log.info('refresh_ui: done')
 
     # ── TAB SWITCHING (Lazy Loading) ──────────────────────────
 
@@ -425,9 +487,25 @@ class MintScanApp:
         try:
             from tray import update_tray_tooltip
             status = 'SECURE' if score >= 75 else 'AT RISK' if score >= 50 else 'CRITICAL'
-            update_tray_tooltip(f'Mint Scan v8 — Score: {score} ({status})')
+            update_tray_tooltip(f'Mint Scan v11.1 — Score: {score} ({status})')
         except Exception:
             pass
+
+    def refresh_ui(self):
+        """Recursively update all widgets to match current theme colors."""
+        try:
+            self.root.configure(fg_color=C['bg'])
+            self.sidebar.configure(fg_color=C['sf'])
+            if hasattr(self, 'clock_lbl'): self.clock_lbl.configure(text_color=C['mu'])
+            if hasattr(self, 'score_lbl'): self.score_lbl.configure(text_color=C['ac'])
+            
+            # Refresh loaded screen backgrounds
+            for key, frame in self._screens.items():
+                try:
+                    frame.configure(fg_color=C['bg'])
+                except: pass
+        except Exception as e:
+            _log.debug(f"UI refresh error: {e}")
 
     def run(self):
         self.root.mainloop()

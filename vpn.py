@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — VPN Client
+Mint Scan v11.1 — VPN Client
 Scans all real config sources including nmcli, /etc/wireguard, and home dirs.
 One-button connect. Shows real status. No hardcoded paths.
 """
@@ -101,6 +101,10 @@ def get_vpn_status() -> dict:
         "nmcli -t -f NAME,TYPE,STATE con show --active 2>/dev/null | grep -i vpn | grep -i activated",
         timeout=4)
     
+    # Check Killswitch (UFW outgoing deny)
+    ufw_out, _, _ = run_cmd("sudo ufw status verbose 2>/dev/null | grep 'Default: deny (outgoing)'", timeout=4)
+    killswitch = 'deny (outgoing)' in ufw_out
+
     ifaces = []
     if active_wg.strip(): ifaces.extend(active_wg.strip().split())
     if tun_out.strip(): 
@@ -118,6 +122,7 @@ def get_vpn_status() -> dict:
         'nm_vpn_active':     bool(nm_active.strip()),
         'nm_vpn_name':       nm_active.split(':')[0].strip() if nm_active.strip() else '',
         'all_ifaces':        sorted(list(set(ifaces))),
+        'killswitch':        killswitch,
     }
 
 
@@ -337,7 +342,10 @@ class VPNScreen(ctk.CTkFrame):
         self._stat_lbl.configure(
             text='🔒 CONNECTED' if connected else '⚠ NOT CONNECTED',
             text_color=C['ok'] if connected else C['wn'])
-        self._stat_info.configure(text=detail)
+        
+        ks_text = "KILLSWITCH: ACTIVE" if st['killswitch'] else "KILLSWITCH: OFF"
+        ks_col  = C['ac'] if st['killswitch'] else C['mu']
+        self._stat_info.configure(text=f"{detail}\n{ks_text}", text_color=ks_col)
 
         # Tool status
         tool_parts = []

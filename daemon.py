@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — Daemon / Service Mode
+Mint Scan v11.1 — Daemon / Service Mode
 Run Mint Scan headlessly as a background service.
 Installs a systemd unit, monitors threats, sends notifications.
 """
@@ -14,7 +14,7 @@ UNIT_FILE = f'/etc/systemd/system/{UNIT_NAME}.service'
 
 UNIT_CONTENT = """\
 [Unit]
-Description=Mint Scan v8 Security Monitor
+Description=Mint Scan v11.1 Security Monitor
 After=network.target
 Wants=network.target
 
@@ -89,7 +89,7 @@ def run_daemon():
     Headless daemon loop — called when running as service.
     Monitors threats and sends notifications indefinitely.
     """
-    log.info('Mint Scan v8 daemon starting...')
+    log.info('Mint Scan v11.1 daemon starting...')
     from notifier import start_threat_monitor
     start_threat_monitor(interval=60)
 

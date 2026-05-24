@@ -1,8 +1,9 @@
 """System Auditor — Live Kernel Audit, Log Analysis, Binary Integrity"""
 import customtkinter as ctk
-import threading, subprocess, time, os, hashlib, json
+import threading, subprocess, time, os, hashlib, json, glob
 from widgets import ScrollableFrame, Card, SectionHeader, InfoGrid, ResultBox, Btn, C, MONO, MONO_SM
 from utils import run_cmd as run
+from database import db
 
 # Critical binaries to monitor
 CRITICAL_BINS = [
@@ -76,6 +77,7 @@ class AuditorScreen(ctk.CTkFrame):
         b_row = ctk.CTkFrame(int_card, fg_color='transparent')
         b_row.pack(fill='x', padx=8, pady=(0,8))
         Btn(b_row, "💾 CREATE BASELINE", command=self._create_baseline, variant='ghost', width=160).pack(side='left', padx=4)
+        Btn(b_row, "🚀 DEEP SCAN (/usr/bin)", command=lambda: self._create_baseline(deep=True), variant='ghost', width=180).pack(side='left', padx=4)
         Btn(b_row, "🛡 VERIFY BINARIES", command=self._verify_integrity, variant='warning', width=160).pack(side='left', padx=4)
 
     def _toggle_audit(self):
@@ -132,48 +134,76 @@ class AuditorScreen(ctk.CTkFrame):
         
         self.after(0, lambda: self.log_res.configure(text=msg, text_color=C['tx']))
 
-    def _create_baseline(self):
-        hashes = {}
-        for b in CRITICAL_BINS:
-            if os.path.exists(b):
-                try:
-                    with open(b, "rb") as f:
-                        hashes[b] = hashlib.sha256(f.read()).hexdigest()
-                except Exception:
-                    pass
-        try:
-            with open(self._baseline_file, 'w') as f:
-                json.dump(hashes, f)
-            self.int_res.destroy()
-            self.int_res = ResultBox(self._int_card, 'ok', 'BASELINE CREATED', f"Hashed {len(hashes)} binaries.")
-            self.int_res.pack(fill='x', padx=8, pady=8)
-        except Exception as e:
-            pass
+    def _create_baseline(self, deep=False):
+        self.int_res.destroy()
+        self.int_res = ResultBox(self._int_card, 'info', 'HASHING...', "Please wait while system binaries are indexed.")
+        self.int_res.pack(fill='x', padx=8, pady=8)
+        
+        def _bg():
+            bins = list(CRITICAL_BINS)
+            if deep:
+                # Add all files in /usr/bin (limit to first 1000 for speed)
+                all_usr_bin = glob.glob('/usr/bin/*')
+                bins = list(set(bins + all_usr_bin[:1000]))
+            
+            count = 0
+            cursor = db.conn.cursor()
+            for b in bins:
+                if os.path.isfile(b) and os.access(b, os.X_OK):
+                    try:
+                        with open(b, "rb") as f:
+                            h = hashlib.sha256(f.read()).hexdigest()
+                        cursor.execute(
+                            "INSERT OR REPLACE INTO file_baseline (path, hash, last_checked) VALUES (?, ?, CURRENT_TIMESTAMP)",
+                            (b, h)
+                        )
+                        count += 1
+                    except Exception:
+                        pass
+            db.conn.commit()
+            
+            def _ui():
+                self.int_res.destroy()
+                self.int_res = ResultBox(self._int_card, 'ok', 'BASELINE CREATED', f"Indexed {count} binaries in database.")
+                self.int_res.pack(fill='x', padx=8, pady=8)
+            self.after(0, _ui)
+
+        threading.Thread(target=_bg, daemon=True).start()
 
     def _verify_integrity(self):
-        if not os.path.exists(self._baseline_file):
+        cursor = db.conn.cursor()
+        cursor.execute("SELECT path, hash FROM file_baseline")
+        baseline = cursor.fetchall()
+        
+        if not baseline:
+            self.int_res.destroy()
+            self.int_res = ResultBox(self._int_card, 'info', 'NO BASELINE', "Create a baseline first to verify integrity.")
+            self.int_res.pack(fill='x', padx=8, pady=8)
             return
-        
-        with open(self._baseline_file) as f:
-            baseline = json.load(f)
-        
-        changed = []
-        for b, old_hash in baseline.items():
-            if os.path.exists(b):
-                try:
-                    with open(b, "rb") as f:
-                        new_hash = hashlib.sha256(f.read()).hexdigest()
-                    if new_hash != old_hash:
-                        changed.append(b)
-                except Exception:
-                    pass
-            else:
-                changed.append(f"{b} (MISSING)")
-        
-        self.int_res.destroy()
-        parent = self._int_card  # use stored ref instead of fragile winfo_children[-1]
-        if changed:
-             self.int_res = ResultBox(parent, 'warn', 'INTEGRITY VIOLATION', f"Modified/Missing: {', '.join(changed)}")
-        else:
-             self.int_res = ResultBox(parent, 'ok', 'INTEGRITY VERIFIED', "All monitored binaries match baseline.")
-        self.int_res.pack(fill='x', padx=8, pady=8)
+
+        def _bg():
+            changed = []
+            for row in baseline:
+                b, old_hash = row['path'], row['hash']
+                if os.path.exists(b):
+                    try:
+                        with open(b, "rb") as f:
+                            new_hash = hashlib.sha256(f.read()).hexdigest()
+                        if new_hash != old_hash:
+                            changed.append(b)
+                    except Exception:
+                        pass
+                else:
+                    changed.append(f"{b} (MISSING)")
+            
+            def _ui():
+                self.int_res.destroy()
+                parent = self._int_card
+                if changed:
+                     self.int_res = ResultBox(parent, 'warn', 'INTEGRITY VIOLATION', f"Modified/Missing: {', '.join(changed[:10])}{' ...' if len(changed)>10 else ''}")
+                else:
+                     self.int_res = ResultBox(parent, 'ok', 'INTEGRITY VERIFIED', f"All {len(baseline)} monitored binaries match baseline.")
+                self.int_res.pack(fill='x', padx=8, pady=8)
+            self.after(0, _ui)
+            
+        threading.Thread(target=_bg, daemon=True).start()

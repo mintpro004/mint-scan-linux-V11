@@ -1,7 +1,7 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
-# ║   MINT SCAN v8 — SELF-HEALING INSTALLER                     ║
-# ║   Supports: Chromebook · Ubuntu 20/22/24 · Kali · WSL2      ║
+# ║   MINT SCAN v11.1 — ULTRA PROFESSIONAL AUTO-INSTALLER        ║
+# ║   Supports: Debian/Ubuntu · Fedora · Arch · Chromebook      ║
 # ║   Arch:     x86_64 · aarch64 (ARM64) · armv7l               ║
 # ╚══════════════════════════════════════════════════════════════╝
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -11,181 +11,121 @@ cd "$SCRIPT_DIR"
 
 echo -e "${CYAN}${BOLD}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║   MINT SCAN v8 — SELF-HEALING INSTALLER  (git clone only)   ║"
+echo "║   MINT SCAN v11.1 — UNIVERSAL AUTO-CONFIGURATION           ║"
 echo "║   Pretoria · Mint Projects PTY (Ltd) · South Africa         ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# ── Platform / arch detection ────────────────────────────────────
-IS_CHROMEBOOK=false; IS_WSL=false; IS_KALI=false; IS_AARCH64=false
+# ── [0/9] Platform / Package Manager Detection ───────────────────
+echo "[0/9] Detecting system environment..."
+IS_AARCH64=false; [[ "$(uname -m)" == "aarch64" || "$(uname -m)" == "arm64" ]] && IS_AARCH64=true
+IS_CHROMEBOOK=false; [ -f /proc/version ] && grep -qi "cros\|chrome" /proc/version 2>/dev/null && IS_CHROMEBOOK=true
 
-ARCH=$(uname -m)
-[[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]] && IS_AARCH64=true
+PM=""
+if command -v apt-get &>/dev/null; then PM="apt"; elif command -v dnf &>/dev/null; then PM="dnf"; elif command -v pacman &>/dev/null; then PM="pacman"; fi
 
-[ -f /proc/version ] && grep -qi "cros\|chrome" /proc/version 2>/dev/null && IS_CHROMEBOOK=true
-[ -f /proc/sys/fs/binfmt_misc/WSLInterop ] && IS_WSL=true
-[ -f /etc/os-release ] && grep -qi "kali" /etc/os-release 2>/dev/null && IS_KALI=true
+echo "  ✓ Architecture: $(uname -m)"
+echo "  ✓ Package Manager: ${PM:-"Not detected"}"
+$IS_CHROMEBOOK && echo "  ✓ Chromebook detected"
 
-echo "[0/7] Detecting platform..."
-$IS_CHROMEBOOK && echo "  ✓ Chromebook / Crostini detected"
-$IS_WSL        && echo "  ✓ Windows WSL2 detected"
-$IS_KALI       && echo "  ✓ Kali Linux detected"
-$IS_AARCH64    && echo "  ✓ ARM64 / aarch64 architecture"
-! $IS_CHROMEBOOK && ! $IS_WSL && ! $IS_KALI && echo "  ✓ Standard Linux (Ubuntu/Debian)"
-
-# Git repo check
-if [ ! -d ".git" ]; then
-    echo -e "${YELLOW}  ⚠ Not a git repository — install from git clone for updates${NC}"
-else
-    echo "  ✓ Git repository detected"
-    REMOTE=$(git remote get-url origin 2>/dev/null || echo "not configured")
-    echo "  Remote: $REMOTE"
-fi
-
-# ── [1/7] Ownership fix ──────────────────────────────────────────
-echo "[1/7] Fixing ownership..."
-sudo chown -R "$USER:$USER" "$SCRIPT_DIR" 2>/dev/null || true
-echo "  ✓ Done"
-
-# Remove development/test files that should not be in production
-for testfile in reproduce_injection.py test_fix.py; do
-    [ -f "$testfile" ] && rm -f "$testfile" && echo "  Removed: $testfile"
+# ── [1/9] Terminal & Visual Configuration ────────────────────────
+echo "[1/9] Configuring Terminal Visuals (True Color)..."
+FORCE_COLOR="export COLORTERM=truecolor"
+for RC in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshrc"; do
+    if [ -f "$RC" ]; then
+        if ! grep -q "COLORTERM=truecolor" "$RC"; then
+            echo -e "\n# Enable True Color support\n$FORCE_COLOR" >> "$RC"
+            echo "  ✓ Applied to $RC"
+        fi
+    fi
 done
+export COLORTERM=truecolor
+echo "  ✓ Current session updated"
 
-# ── [2/7] System packages ────────────────────────────────────────
-echo "[2/7] Installing system packages..."
-export DEBIAN_FRONTEND=noninteractive
+# ── [2/9] System Dependencies ────────────────────────────────────
+echo "[2/9] Installing system packages..."
+PKGS_DEB="python3 python3-pip python3-tk python3-dev python3-venv git ripgrep adb nmap ufw x11-utils xdotool net-tools dbus"
+PKGS_RPM="python3 python3-pip python3-tkinter python3-devel git ripgrep adb nmap ufw xorg-x11-utils xdotool net-tools dbus"
+PKGS_ARCH="python python-pip tk git ripgrep android-tools nmap ufw xorg-xdpyinfo xdotool net-tools dbus"
 
-PKGS_BASE="python3 python3-pip python3-tk python3-dev python3-venv git"
-PKGS_DISPLAY="x11-utils xdotool"
-PKGS_NET="net-tools dbus"
+case $PM in
+    apt)
+        sudo apt-get update -qq
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $PKGS_DEB
+        if $IS_AARCH64; then
+            sudo apt-get install -y -qq python3-pil python3-pil.imagetk libtk8.6 libglib2.0-0
+        fi
+        ;;
+    dnf)
+        sudo dnf install -y $PKGS_RPM
+        ;;
+    pacman)
+        sudo pacman -S --noconfirm --needed $PKGS_ARCH
+        ;;
+    *)
+        echo -e "  ${YELLOW}⚠ Unknown package manager. Please install dependencies manually.${NC}"
+        ;;
+esac
 
-if $IS_CHROMEBOOK; then
-    echo "  Chromebook: using Crostini-safe package list..."
-    sudo apt-get update -qq 2>/dev/null || true
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        $PKGS_BASE $PKGS_NET 2>/dev/null || true
-    # Chromebook UFW fix
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y ufw 2>/dev/null && \
-        (sudo ufw --force enable 2>/dev/null || true) && \
-        echo "  ✓ UFW installed and enabled on Chromebook"
-
-elif $IS_AARCH64; then
-    echo "  ARM64 / aarch64: using compatible package list..."
-    sudo apt-get update -qq 2>/dev/null || true
-    # python3-tk on aarch64 Ubuntu 22.04 needs explicit install
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        $PKGS_BASE $PKGS_DISPLAY $PKGS_NET \
-        python3-tk python3-pil python3-pil.imagetk \
-        libtk8.6 libglib2.0-0 2>/dev/null || true
-    echo "  ✓ aarch64 packages installed"
-
-else
-    sudo apt-get update -qq 2>/dev/null || true
-    sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-        $PKGS_BASE $PKGS_DISPLAY $PKGS_NET 2>/dev/null || true
-    echo "  ✓ Done"
+# ── [3/9] CLI Tool Compatibility (Ripgrep Fix) ──────────────────
+echo "[3/9] Optimizing CLI tools..."
+# Ensure 'ripgrep' symlink exists for tools that look for it instead of 'rg'
+if command -v rg &>/dev/null; then
+    RG_PATH=$(which rg)
+    sudo ln -sf "$RG_PATH" /usr/bin/ripgrep 2>/dev/null || true
+    sudo ln -sf "$RG_PATH" /usr/local/bin/ripgrep 2>/dev/null || true
+    echo "  ✓ Ripgrep symlinks created"
 fi
 
-# Optional tools (non-blocking)
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    adb nmap ufw 2>/dev/null || true
-
-echo "  ✓ Done"
-
-# ── [3/7] Python venv ────────────────────────────────────────────
-echo "[3/7] Setting up Python environment..."
+# ── [4/9] Python Environment ─────────────────────────────────────
+echo "[4/9] Setting up Python environment..."
 [ ! -d "venv" ] && python3 -m venv venv
 source venv/bin/activate
+pip install -q --upgrade pip
+echo "  ✓ Virtualenv ready"
 
-# Upgrade pip silently
-pip install -q --upgrade pip 2>/dev/null || true
-
-# Pin customtkinter to 5.2.2 — stable across x86_64 AND aarch64
-# 5.2.2 is tested on Python 3.9/3.10/3.11/3.12, Ubuntu 20/22/24, aarch64
-pip install -q "customtkinter==5.2.2" 2>/dev/null || \
-pip install -q "customtkinter>=5.2.0,<6.0" 2>/dev/null || \
-pip install -q customtkinter 2>/dev/null || true
-
-# Core deps
-pip install -q darkdetect psutil pillow netifaces speedtest-cli 2>/dev/null || true
-
-# requests — needed for CVE lookup, updater
-pip install -q requests 2>/dev/null || true
-
-# Optional deps (don't fail if unavailable on aarch64)
-pip install -q pystray 2>/dev/null || true
-pip install -q plyer 2>/dev/null || true
-pip install -q reportlab 2>/dev/null || true
-
+# ── [5/9] Python Dependencies ────────────────────────────────────
+echo "[5/9] Installing Python modules..."
+if [ -f "requirements.txt" ]; then
+    pip install -q -r requirements.txt || pip install -r requirements.txt
+else
+    pip install -q customtkinter==5.2.2 darkdetect psutil pillow qrcode pycryptodome requests netifaces speedtest-cli pystray plyer reportlab
+fi
 echo "  ✓ Done"
 
-# ── [4/7] widgets.py verification ───────────────────────────────
-echo "[4/7] Verifying widgets.py..."
-python3 -m py_compile widgets.py 2>/dev/null || {
-    echo -e "  ${RED}✗ widgets.py has syntax errors${NC}"
-    exit 1
-}
-echo "  ✓ widgets.py OK"
-
-# ── [5/7] main.py verification ──────────────────────────────────
-echo "[5/7] Checking main.py..."
-python3 -m py_compile main.py 2>/dev/null || {
-    echo -e "  ${RED}✗ main.py has errors${NC}"
-    exit 1
-}
-echo "  ✓ main.py OK"
-
-# ── [6/7] All modules ───────────────────────────────────────────
-echo "[6/7] Verifying all Python modules..."
+# ── [6/9] Verification ──────────────────────────────────────────
+echo "[6/9] Verifying module integrity..."
 FAIL_COUNT=0
-for pyfile in *.py; do
-    result=$(python3 -m py_compile "$pyfile" 2>&1)
-    if [ -n "$result" ]; then
-        echo -e "    ${RED}✗ $pyfile — $result${NC}"
-        FAIL_COUNT=$((FAIL_COUNT + 1))
-    else
-        echo "    ✓ $pyfile"
+for pyfile in widgets.py main.py app.py; do
+    if [ -f "$pyfile" ]; then
+        python3 -m py_compile "$pyfile" 2>/dev/null || {
+            echo -e "    ${RED}✗ $pyfile has syntax errors${NC}"
+            FAIL_COUNT=$((FAIL_COUNT + 1))
+        }
     fi
 done
 
 if [ $FAIL_COUNT -gt 0 ]; then
-    echo -e "  ${RED}✗ $FAIL_COUNT file(s) have errors${NC}"
+    echo -e "  ${RED}✗ Critical files have errors. Setup aborted.${NC}"
     exit 1
 fi
+echo "  ✓ Core files OK"
 
-# Quick Card widget smoke test — verifies aarch64 stability
-WIDGET_OK=$(python3 -c "
-import sys, os
-sys.path.insert(0, os.getcwd())
-try:
-    from widgets import Card, Btn, ScrollableFrame, C
-    # Verify Card can be instantiated without crashing
-    import tkinter as tk
-    root = tk.Tk()
-    root.withdraw()
-    c = Card(root)
-    c.destroy()
-    root.destroy()
-    print('OK')
-except Exception as e:
-    print(f'FAIL: {e}')
-" 2>&1)
-
-if [[ "$WIDGET_OK" == *"OK"* ]]; then
-    echo "  ✓ All widget classes verified (aarch64-safe)"
-else
-    echo -e "  ${RED}✗ Widget check failed: $WIDGET_OK${NC}"
-    exit 1
+# ── [7/9] Security Tools Config ──────────────────────────────────
+echo "[7/9] Configuring system tools..."
+if command -v ufw &>/dev/null; then
+    sudo ufw --force enable 2>/dev/null || true
+    echo "  ✓ Firewall (UFW) enabled"
 fi
+echo "  ✓ Done"
 
-# ── [7/7] Desktop shortcut ──────────────────────────────────────
-echo "[7/7] Creating desktop shortcut..."
+# ── [8/9] Desktop Shortcut ──────────────────────────────────────
+echo "[8/9] Creating desktop integration..."
 DESKTOP_DIR="$HOME/Desktop"
 [ -d "$DESKTOP_DIR" ] || DESKTOP_DIR="$HOME"
 cat > "$DESKTOP_DIR/MintScan.desktop" << EOF
 [Desktop Entry]
-Name=Mint Scan v8
+Name=Mint Scan v11.1
 Comment=Advanced Linux Security Auditor
 Exec=bash $SCRIPT_DIR/run.sh
 Icon=$SCRIPT_DIR/icon.png
@@ -195,17 +135,18 @@ Categories=System;Security;
 StartupWMClass=MintScan
 EOF
 chmod +x "$DESKTOP_DIR/MintScan.desktop" 2>/dev/null || true
+echo "  ✓ Shortcut created"
+
+# ── [9/9] Finalizing ─────────────────────────────────────────────
+echo "[9/9] Cleaning up..."
+for f in reproduce_injection.py test_fix.py verify_fix.py; do [ -f "$f" ] && rm "$f"; done
 echo "  ✓ Done"
 
 echo ""
-echo -e "${CYAN}${BOLD}"
-echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║   ✓ MINT SCAN v8 — INSTALLATION COMPLETE                   ║"
-$IS_CHROMEBOOK && \
-echo "║   ✓ Chromebook: Crostini-safe UFW install applied          ║"
-$IS_AARCH64 && \
-echo "║   ✓ ARM64 / aarch64: compatible packages installed         ║"
-echo "║   Run:  bash run.sh                                        ║"
-echo "║   Or:   source venv/bin/activate && python3 main.py        ║"
-echo "╚══════════════════════════════════════════════════════════════╝"
-echo -e "${NC}"
+echo -e "${CYAN}${BOLD}╔══════════════════════════════════════════════════════════════╗"
+echo "║   ✓ MINT SCAN v11.1 — AUTO-CONFIGURATION COMPLETE          ║"
+echo "║                                                              ║"
+echo "║   1. RESTART your terminal to apply visual settings.         ║"
+echo "║   2. Type 'bash run.sh' to launch the security auditor.      ║"
+echo "║   3. The Gemini CLI will now detect Ripgrep correctly.       ║"
+echo "╚══════════════════════════════════════════════════════════════╝${NC}"

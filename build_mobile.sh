@@ -1,6 +1,6 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
-# ║   MINT SCAN v8 — CROSS-PLATFORM MOBILE APP BUILDER          ║
+# ║   MINT SCAN v11.1 — CROSS-PLATFORM MOBILE APP BUILDER       ║
 # ║   Android APK · iOS PWA · Windows EXE · macOS APP           ║
 # ╚══════════════════════════════════════════════════════════════╝
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -22,7 +22,7 @@ done
 
 echo -e "${CYAN}${BOLD}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║   MINT SCAN v8 — MOBILE APP BUILDER                         ║"
+echo "║   MINT SCAN v11.1 — MOBILE APP BUILDER                      ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -33,7 +33,7 @@ make_pwa_assets() {
   local dst="$1"
   cat > "$dst/manifest.json" << 'MANIFEST'
 {
-  "name": "Mint Scan v8",
+  "name": "Mint Scan v11.1",
   "short_name": "MintScan",
   "description": "Advanced Security Auditor — Mint Projects, Pretoria",
   "start_url": "./index.html",
@@ -95,7 +95,7 @@ CYAN='\033[0;36m'; GREEN='\033[0;32m'; RED='\033[0;31m'; NC='\033[0m'
 DIR="$(cd "$(dirname "$0")" && pwd)"
 PORT=9876
 
-echo -e "${CYAN}Mint Scan v8 — Android ADB Installer${NC}"
+echo -e "${CYAN}Mint Scan v11.1 — Android ADB Installer${NC}"
 
 if ! command -v adb &>/dev/null; then
   echo -e "${RED}ADB not found. Run: sudo apt-get install adb${NC}"; exit 1
@@ -148,7 +148,7 @@ ADBSH
 
   # Create Android README
   cat > "$A/README.txt" << 'ANDREADME'
-MINT SCAN v8 — ANDROID INSTALLATION
+MINT SCAN v11.1 — ANDROID INSTALLATION
 ======================================
 
 METHOD 1 — USB + ADB (Recommended, works on Android 16):
@@ -200,7 +200,7 @@ if [ "$BUILD_IOS" = true ]; then
   sed -i 's|</body>|<script>if("serviceWorker"in navigator){navigator.serviceWorker.register("./sw.js");}</script>\n</body>|' "$I/index.html"
 
   cat > "$I/README.txt" << 'IOSREADME'
-MINT SCAN v8 — iOS INSTALLATION
+MINT SCAN v11.1 — iOS INSTALLATION
 ==================================
 iOS does not allow sideloading APKs. Use the Safari PWA method:
 
@@ -243,13 +243,13 @@ if [ "$BUILD_WINDOWS" = true ]; then
 {
   "name": "mint-scan-v8",
   "version": "8.0.0",
-  "description": "Mint Scan v8 — Advanced Security Auditor by Mint Projects",
+  "description": "Mint Scan v11.1 — Advanced Security Auditor by Mint Projects",
   "main": "main.js",
   "author": "Mint Projects PTY (Ltd), Pretoria, South Africa",
   "license": "Proprietary",
   "scripts": {
     "start":     "electron .",
-    "build-win": "electron-packager . \"Mint Scan\" --platform=win32 --arch=x64 --out=dist --overwrite --icon=icon.ico --app-version=8.0.0 --win32metadata.ProductName=\"Mint Scan v8\" --win32metadata.CompanyName=\"Mint Projects\"",
+    "build-win": "electron-packager . \"Mint Scan\" --platform=win32 --arch=x64 --out=dist --overwrite --icon=icon.ico --app-version=8.0.0 --win32metadata.ProductName=\"Mint Scan v11.1\" --win32metadata.CompanyName=\"Mint Projects\"",
     "build-win32":"electron-packager . \"Mint Scan\" --platform=win32 --arch=ia32 --out=dist --overwrite"
   },
   "devDependencies": {
@@ -272,7 +272,7 @@ app.whenReady().then(() => {
     height: 920,
     minWidth: 380,
     minHeight: 700,
-    title: 'Mint Scan v8',
+    title: 'Mint Scan v11.1',
     backgroundColor: '#05111f',
     show: false,
     webPreferences: {
@@ -330,9 +330,9 @@ WINMAIN
   # Windows run script
   cat > "$W/START.bat" << 'WINBAT'
 @echo off
-title Mint Scan v8
+title Mint Scan v11.1
 echo ====================================
-echo   Mint Scan v8 - Starting...
+echo   Mint Scan v11.1 - Starting...
 echo ====================================
 echo.
 
@@ -357,15 +357,15 @@ if not exist "node_modules" (
   )
 )
 
-echo Launching Mint Scan v8...
+echo Launching Mint Scan v11.1...
 npx electron .
 WINBAT
 
   cat > "$W/BUILD_EXE.bat" << 'WINBUILD'
 @echo off
-title Mint Scan v8 - Build Windows EXE
+title Mint Scan v11.1 - Build Windows EXE
 echo ====================================
-echo   Building Mint Scan v8 Windows EXE
+echo   Building Mint Scan v11.1 Windows EXE
 echo ====================================
 echo.
 where node >nul 2>&1
@@ -382,7 +382,7 @@ pause
 WINBUILD
 
   cat > "$W/README.txt" << 'WINREADME'
-MINT SCAN v8 — WINDOWS INSTALLATION
+MINT SCAN v11.1 — WINDOWS INSTALLATION
 ======================================
 REQUIREMENTS: Node.js 18+ from https://nodejs.org (FREE)
 
@@ -424,7 +424,7 @@ if [ "$BUILD_MACOS" = true ]; then
 {
   "name": "mint-scan-v8",
   "version": "8.0.0",
-  "description": "Mint Scan v8 — Advanced Security Auditor by Mint Projects",
+  "description": "Mint Scan v11.1 — Advanced Security Auditor by Mint Projects",
   "main": "main.js",
   "author": "Mint Projects PTY (Ltd)",
   "license": "Proprietary",
@@ -448,7 +448,7 @@ const path = require('path');
 let win;
 app.whenReady().then(() => {
   win = new BrowserWindow({ width:440, height:920, minWidth:380, minHeight:700,
-    title:'Mint Scan v8', backgroundColor:'#05111f', show:false,
+    title:'Mint Scan v11.1', backgroundColor:'#05111f', show:false,
     webPreferences:{ nodeIntegration:false, contextIsolation:true } });
   win.loadFile(path.join(__dirname,'index.html'));
   win.once('ready-to-show', () => win.show());
@@ -469,7 +469,7 @@ MACMAIN
   cat > "$M/build_macos.sh" << 'MACBUILD'
 #!/bin/bash
 set -e
-echo "=== Mint Scan v8 — macOS Builder ==="
+echo "=== Mint Scan v11.1 — macOS Builder ==="
 DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DIR"
 if ! command -v node &>/dev/null; then
@@ -533,7 +533,7 @@ fi
 echo ""
 echo -e "${GREEN}${BOLD}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║   BUILD COMPLETE — Mint Scan v8 Mobile Apps                 ║"
+echo "║   BUILD COMPLETE — Mint Scan v11.1 Mobile Apps                 ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 [ "$BUILD_ANDROID" = true ] && printf "║  %-58s║\n" "  Android  → mobile_builds/android/  (bash install_via_adb.sh)"
 [ "$BUILD_IOS"     = true ] && printf "║  %-58s║\n" "  iOS      → mobile_builds/ios/       (Safari → Add to Home Screen)"

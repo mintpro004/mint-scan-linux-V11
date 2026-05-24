@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — Real-Time Desktop Notifications
+Mint Scan v11.1 — Real-Time Desktop Notifications
 Sends desktop notifications for critical threats via:
   1. libnotify (notify-send) — all Linux
   2. plyer      (pip install plyer) — cross-platform fallback
@@ -33,7 +33,7 @@ def _send_desktop(title: str, msg: str, urgency: str = 'critical'):
     if subprocess.run('which notify-send', shell=True,
                       capture_output=True).returncode == 0:
         cmd = (f'notify-send {icon_arg} --urgency={urgency} '
-               f'--app-name="Mint Scan v8" "{title}" "{msg}"')
+               f'--app-name="Mint Scan v11.1" "{title}" "{msg}"')
         subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL,
                          stderr=subprocess.DEVNULL)
         return
@@ -42,7 +42,7 @@ def _send_desktop(title: str, msg: str, urgency: str = 'critical'):
     try:
         from plyer import notification
         notification.notify(title=title, message=msg,
-                            app_name='Mint Scan v8', timeout=8)
+                            app_name='Mint Scan v11.1', timeout=8)
         return
     except Exception:
         pass
@@ -60,10 +60,15 @@ def _worker():
         # Cooldown check
         now = time.time()
         key = title[:40]
-        if now - _COOLDOWN.get(key, 0) < COOLDOWN_SECS:
+        
+        # Specific longer cooldown for disk warnings
+        cooldown = 3600 if 'Disk Almost Full' in title else COOLDOWN_SECS
+        
+        if now - _COOLDOWN.get(key, 0) < cooldown:
             continue
         _COOLDOWN[key] = now
 
+        log.info(f'[{level}] {title}: {msg}')
         urgency = 'critical' if level == 'CRITICAL' else 'normal'
         _send_desktop(title, msg, urgency)
         for cb in list(_toast_callbacks):
@@ -81,7 +86,6 @@ def notify(title: str, msg: str, level: str = 'WARNING'):
     Queue a notification. level: 'CRITICAL' | 'WARNING' | 'INFO'
     Non-blocking — returns immediately.
     """
-    log.info(f'[{level}] {title}: {msg}')
     _queue.put((title, msg, level))
 
 

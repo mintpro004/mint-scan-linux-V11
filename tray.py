@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — System Tray Icon
+Mint Scan v11.1 — System Tray Icon
 Chromebook/Crostini-safe: detects missing systray manager and silently disables.
 Uses AppIndicator3 on Ubuntu/Kali, falls back to pystray, then silently disables.
 """
@@ -95,7 +95,7 @@ def start_tray(app_ref, score_fn=None):
         pystray.Menu.SEPARATOR,
         pystray.MenuItem('Quit',           _quit),
     )
-    _tray_icon = pystray.Icon('mintscan', img, 'Mint Scan v8', menu)
+    _tray_icon = pystray.Icon('mintscan', img, 'Mint Scan v11.1', menu)
 
     def _run():
         try:

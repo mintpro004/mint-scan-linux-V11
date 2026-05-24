@@ -275,8 +275,66 @@ class NetScanScreen(ctk.CTkFrame):
 
     def _do_device_scan(self, ip):
         self._safe_after(0, lambda: self._log_traffic(f"Scanning {ip}..."))
-        out, _, _ = run(f"nmap -T4 --open -p 1-1000 {ip} 2>/dev/null", timeout=30)
-        self._safe_after(0, lambda: self._log_traffic(f"Results for {ip}:\n{out[:600]}"))
+        # Use -sV for service/version detection
+        out, _, _ = run(f"nmap -T4 -sV --open -p 1-1000 {ip} 2>/dev/null", timeout=60)
+        self._safe_after(0, lambda: self._log_traffic(f"Scan complete for {ip}"))
+        
+        results = []
+        for line in out.splitlines():
+            if "/tcp" in line and "open" in line:
+                parts = re.split(r'\s+', line.strip())
+                if len(parts) >= 3:
+                    port = parts[0]
+                    service = parts[2]
+                    version = " ".join(parts[3:]) if len(parts) > 3 else ""
+                    results.append({'port': port, 'service': service, 'version': version})
+        
+        self._safe_after(0, self._render_scan_results, ip, results)
+
+    def _render_scan_results(self, ip, results):
+        # We'll use the results_frame or similar. Let's create a popup or use fix_frame.
+        # For now, let's use the devices_frame to show the results below the device.
+        pop = ctk.CTkToplevel(self)
+        pop.title(f"Port Scan Results: {ip}")
+        pop.geometry("600x450")
+        pop.configure(fg_color=C['bg'])
+        pop.attributes('-topmost', True)
+        
+        inner = ScrollableFrame(pop)
+        inner.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        ctk.CTkLabel(inner, text=f"OPEN PORTS ON {ip}", 
+                     font=('DejaVu Sans Mono', 12, 'bold'), text_color=C['ac']).pack(pady=(0,10))
+        
+        if not results:
+            ctk.CTkLabel(inner, text="No open ports found in range 1-1000.", font=MONO_SM, text_color=C['mu']).pack()
+        else:
+            for res in results:
+                card = Card(inner)
+                card.pack(fill='x', pady=4)
+                row = ctk.CTkFrame(card, fg_color='transparent')
+                row.pack(fill='x', padx=10, pady=8)
+                
+                ctk.CTkLabel(row, text=res['port'], font=('DejaVu Sans Mono', 10, 'bold'), text_color=C['ok'], width=80).pack(side='left')
+                ctk.CTkLabel(row, text=res['service'].upper(), font=('DejaVu Sans Mono', 10), text_color=C['tx'], width=100).pack(side='left', padx=10)
+                
+                ver = res['version'] or "Unknown version"
+                ctk.CTkLabel(row, text=ver, font=MONO_SM, text_color=C['mu'], anchor='w').pack(side='left', fill='x', expand=True)
+                
+                if res['version']:
+                    Btn(row, "🔬 INVESTIGATE CVE", 
+                        command=lambda v=f"{res['service']} {res['version']}": self._investigate_cve(v, pop),
+                        variant='ghost', width=130).pack(side='right')
+
+        Btn(pop, "CLOSE", command=pop.destroy, variant='ghost', width=100).pack(pady=10)
+
+    def _investigate_cve(self, query, popup):
+        popup.destroy()
+        self.app._switch_tab('cvelookup')
+        # Access the frame and trigger search
+        cve_screen = self.app._frames.get('cvelookup')
+        if cve_screen:
+            cve_screen.search_external(query)
 
     def _toggle_capture(self):
         if self._capturing:
@@ -460,7 +518,7 @@ class NetScanScreen(ctk.CTkFrame):
                 f.write(buf.getvalue())
         else:
             with open(path, 'w') as f:
-                f.write(f"# Mint Scan v8 — Traffic Log\n")
+                f.write(f"# Mint Scan v11.1 — Traffic Log\n")
                 f.write(f"# Saved: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"# Lines: {len(txt.splitlines())}\n\n")
                 f.write(txt)

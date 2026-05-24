@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Mint Scan v8 — Entry Point
+Mint Scan v11.1 — Entry Point
 Cross-platform launcher: x86_64, aarch64, Chromebook, WSL2, Wayland, X11.
 """
 import sys, os

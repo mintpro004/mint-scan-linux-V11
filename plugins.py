@@ -1,11 +1,11 @@
 """
-Mint Scan v8 — Plugin System
+Mint Scan v11.1 — Plugin System
 Load custom security modules from ~/.mint_scan_plugins/
 Each plugin is a Python file exposing:
   PLUGIN_META = {'name':'...', 'version':'1.0', 'author':'...', 'description':'...'}
   class PluginScreen(ctk.CTkFrame): ...
 """
-import os, sys, importlib.util, threading, time, traceback
+import os, sys, importlib.util, threading, time, traceback, subprocess, shutil
 import customtkinter as ctk
 import tkinter as tk
 from widgets import C, MONO, MONO_SM, ScrollableFrame, Card, SectionHeader, Btn, ResultBox
@@ -112,11 +112,18 @@ class PluginScreen(ctk.CTkFrame):
         Btn(hdr, '↺ RELOAD', command=self._refresh,
             variant='ghost', width=90).pack(side='right', padx=8, pady=6)
         Btn(hdr, '📂 OPEN FOLDER',
-            command=lambda: os.system(f'xdg-open "{PLUGIN_DIR}" &'),
+            command=self._open_folder,
             variant='ghost', width=130).pack(side='right', padx=4, pady=6)
 
         self.scroll = ScrollableFrame(self)
         self.scroll.pack(fill='both', expand=True)
+
+    def _open_folder(self):
+        try:
+            if shutil.which('xdg-open'):
+                subprocess.Popen(['xdg-open', PLUGIN_DIR], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
     def _refresh(self):
         for w in self.scroll.winfo_children(): w.destroy()

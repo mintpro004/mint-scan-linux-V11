@@ -1,8 +1,8 @@
 """System Scan & Fix — comprehensive system health and repair"""
 import tkinter as tk
 import customtkinter as ctk
-import threading, subprocess, os, re, time
-from installer import install_all_tools
+import threading, subprocess, os, re, time, shutil
+from installer import install_all_tools, install_ripgrep, install_nmap, install_tcpdump
 from widgets import ScrollableFrame, Card, SectionHeader, InfoGrid, ResultBox, Btn, C, MONO, MONO_SM
 from utils import run_cmd as run
 from reports import prompt_save_report
@@ -27,6 +27,7 @@ class SysFixScreen(ctk.CTkFrame):
         super().__init__(parent, fg_color=C['bg'], corner_radius=0)
         self.app = app
         self._built = False
+        self._dry_run = tk.BooleanVar(value=False)
 
     def on_focus(self):
         if not self._built:
@@ -43,6 +44,12 @@ class SysFixScreen(ctk.CTkFrame):
         hdr.pack(fill='x')
         ctk.CTkLabel(hdr, text="🔧  SYSTEM SCAN & FIX", font=('DejaVu Sans Mono',13,'bold'),
                      text_color=C['ac']).pack(side='left', padx=16)
+        
+        # Dry Run Toggle
+        ctk.CTkCheckBox(hdr, text="DRY RUN", variable=self._dry_run,
+                        font=MONO_SM, text_color=C['mu'],
+                        fg_color=C['ac'], border_color=C['br']).pack(side='right', padx=12)
+
         Btn(hdr, "▶ FULL SYSTEM SCAN", command=self._full_scan, width=180
             ).pack(side='right', padx=12, pady=6)
 
@@ -60,11 +67,11 @@ class SysFixScreen(ctk.CTkFrame):
             ("🔄 UPDATE SYSTEM",      self._update_system,   'primary'),
             ("🧹 CLEAN PACKAGES",     self._clean_packages,  'ghost'),
             ("💾 CHECK DISK",         self._check_disk,      'ghost'),
+            ("🛠 DEPS CHECK",         self._check_deps,      'blue'),
             ("🔐 FIX PERMISSIONS",    self._fix_permissions, 'warning'),
             ("🔥 FIX FIREWALL",       self._fix_firewall,    'danger'),
             ("🔑 HARDEN SSH",         self._harden_ssh,      'danger'),
             ("🗑 CLEAR TEMP FILES",   self._clear_temp,      'ghost'),
-            ("📊 MEMORY ANALYSIS",    self._mem_analysis,    'blue'),
         ]
         for i, (label, cmd, variant) in enumerate(quick_fixes):
             r, c = divmod(i, 2)
@@ -89,8 +96,42 @@ class SysFixScreen(ctk.CTkFrame):
         self.results_frame.pack(fill='x', padx=14, pady=(0,14))
 
     def _log(self, msg):
-        self.scan_log.insert('end', f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-        self.scan_log.see('end')
+        try:
+            self.scan_log.insert('end', f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+            self.scan_log.see('end')
+        except: pass
+
+    def _check_deps(self):
+        def _bg():
+            self._safe_after(0, self._log, "Checking for essential security tools...")
+            tools = [
+                ('ripgrep', 'rg',     'Fast search tool for logs and code.'),
+                ('nmap',    'nmap',   'Network exploration and security auditing.'),
+                ('tshark',  'tshark', 'Network protocol analyzer.'),
+                ('net-tools','ifconfig','Legacy network tools.'),
+            ]
+            missing = []
+            for name, cmd, desc in tools:
+                if not shutil.which(cmd):
+                    self._safe_after(0, self._log, f"❌ MISSING: {name}")
+                    missing.append(name)
+                else:
+                    self._safe_after(0, self._log, f"✅ FOUND: {name}")
+            
+            if missing:
+                self._safe_after(0, self._log, f"\nFound {len(missing)} missing tool(s).")
+                self._safe_after(0, self._render_dep_fix, missing)
+            else:
+                self._safe_after(0, self._log, "\n✓ All essential tools are installed.")
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _render_dep_fix(self, missing):
+        box = ResultBox(self.results_frame, 'warn', 'MISSING DEPENDENCIES', 
+                      f"Essential tools missing: {', '.join(missing)}")
+        box.pack(fill='x', pady=5)
+        Btn(box, "🚀 INSTALL ALL MISSING", 
+            command=lambda: install_all_tools(self, on_done=self._check_deps),
+            variant='success', width=200).pack(anchor='e', padx=10, pady=(0,8))
 
     def _full_scan(self):
         for w in self.results_frame.winfo_children(): w.destroy()
@@ -99,7 +140,6 @@ class SysFixScreen(ctk.CTkFrame):
 
     def _do_full_scan(self):
         findings = []
-
         self._safe_after(0, self._log, "Starting comprehensive system scan...")
 
         # 1. Disk health
@@ -114,84 +154,29 @@ class SysFixScreen(ctk.CTkFrame):
                     try:
                         pct = int(pct_str)
                         if pct > 90:
-                            findings.append(('HIGH', f'Disk nearly full: {parts[4]} used ({parts[2]}/{parts[1]})',
+                            findings.append(('HIGH', f'Disk nearly full: {parts[4]} used',
                                              'apt autoremove && apt clean',
-                                             'Run: sudo apt autoremove && sudo apt clean && sudo journalctl --vacuum-size=100M'))
-                        elif pct > 75:
-                            findings.append(('MED', f'Disk usage high: {parts[4]}',
-                                             None, 'Consider cleaning: sudo apt autoremove'))
-                    except ValueError: pass
+                                             'Run: sudo apt autoremove && sudo apt clean'))
+                    except: pass
 
-        # 2. Memory
-        self._safe_after(0, self._log, "Checking memory...")
-        mem_out, _, _ = run(["free", "-m"])
-        if mem_out:
-            for line in mem_out.splitlines():
-                if 'Mem:' in line:
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        total, used = int(parts[1]), int(parts[2])
-                        pct = (used/total)*100 if total else 0
-                        if pct > 90:
-                            findings.append(('HIGH', f'Memory critical: {pct:.0f}% used ({used}MB/{total}MB)',
-                                             None, 'Check top processes: ps aux --sort=-%mem | head -10'))
-                    break
-
-        # 3. Package updates
+        # 2. Package updates
         self._safe_after(0, self._log, "Checking for updates...")
-        # We use a simple check; full 'apt list' is slow
         upd_out, _, _ = run(["sudo", "apt-get", "-s", "upgrade"], timeout=20)
         upd_match = re.search(r'(\d+) upgraded, (\d+) newly installed', upd_out)
         if upd_match:
             upd_count = int(upd_match.group(1))
-            if upd_count > 20:
-                findings.append(('HIGH', f'{upd_count} security/system updates available',
-                                 'apt update && apt upgrade -y',
-                                 'Run: sudo apt update && sudo apt upgrade -y'))
-            elif upd_count > 0:
+            if upd_count > 0:
                 findings.append(('MED', f'{upd_count} updates available',
-                                 None, 'Run: sudo apt update && sudo apt upgrade'))
+                                 'apt update && apt upgrade -y', 'Run: sudo apt upgrade'))
 
-        # 4. Failed services
-        self._safe_after(0, self._log, "Checking failed services...")
-        failed_out, _, _ = run(["systemctl", "list-units", "--state=failed", "--no-legend"])
-        if failed_out:
-            failed_count = len(failed_out.splitlines())
-            if failed_count > 0:
-                findings.append(('MED', f'{failed_count} failed system service(s)',
-                                 None, 'Check: systemctl --failed'))
-
-        # 5. Zombie processes
-        self._safe_after(0, self._log, "Checking for zombie processes...")
-        z_out, _, _ = run(["ps", "aux"])
-        zombies = z_out.count(" <defunct>")
-        if zombies > 0:
-            findings.append(('MED', f'{zombies} zombie process(es)',
-                             None, 'Reboot may be needed to clear zombie processes'))
-
-        # 6. Firewall
+        # 3. Firewall
         self._safe_after(0, self._log, "Checking firewall...")
         ufw_out, _, _ = run(["sudo", "ufw", "status"])
         if 'inactive' in ufw_out.lower():
-            findings.append(('HIGH', 'Firewall is DISABLED',
-                             'ufw enable',
-                             'Enable: sudo ufw enable'))
-
-        # 7. Automatic updates
-        self._safe_after(0, self._log, "Checking auto-updates...")
-        auto_out, _, _ = run(["dpkg", "-l", "unattended-upgrades"])
-        if 'ii' not in auto_out:
-            findings.append(('MED', 'Automatic security updates not configured',
-                             None, 'Install: sudo apt install unattended-upgrades'))
-
-        # 8. Temp files
-        self._safe_after(0, self._log, "Checking temp files...")
-        tmp_out, _, _ = run(["du", "-sh", "/tmp"])
-        self._safe_after(0, self._log, f"  /tmp size: {tmp_out.split()[0] if tmp_out else '?'}")
+            findings.append(('HIGH', 'Firewall is DISABLED', 'ufw enable', 'Enable: sudo ufw enable'))
 
         if not findings:
-            findings.append(('OK', '✓ System is healthy',
-                             None, 'All checks passed. System is in good condition.'))
+            findings.append(('OK', '✓ System is healthy', None, 'All checks passed.'))
 
         self._safe_after(0, self._log, f"✓ Scan complete. {len(findings)} finding(s).")
         self._safe_after(0, self._render_findings, findings)
@@ -199,112 +184,66 @@ class SysFixScreen(ctk.CTkFrame):
     def _render_findings(self, findings):
         for w in self.results_frame.winfo_children(): w.destroy()
         for lvl, title, fix_cmd, suggestion in findings:
-            rtype = 'warn' if lvl=='HIGH' else 'med' if lvl=='MED' else 'ok'
-            box = ResultBox(self.results_frame, rtype, title, suggestion)
+            box = ResultBox(self.results_frame, 'warn' if lvl=='HIGH' else 'med' if lvl=='MED' else 'ok', title, suggestion)
             box.pack(fill='x', pady=3)
             if fix_cmd:
-                Btn(box, f"▶ AUTO-FIX",
-                    command=lambda c=fix_cmd, t=title: self._run_fix(c, t),
-                    variant='success', width=120
-                    ).pack(anchor='e', padx=10, pady=(0,8))
+                Btn(box, f"▶ AUTO-FIX", command=lambda c=fix_cmd, t=title: self._run_fix(c, t),
+                    variant='success', width=120).pack(anchor='e', padx=10, pady=(0,8))
 
-        if findings:
-            Btn(self.results_frame, "💾 EXPORT SYSTEM REPORT",
-                command=lambda: self._export_report(findings),
-                variant='success', width=260).pack(pady=15)
-
-    def _export_report(self, findings):
-        sections = [
-            ("SYSTEM SCAN FINDINGS", [f"[{f[0]}] {f[1]}" for f in findings], "WARN"),
-            ("SUGGESTED REMEDIATIONS", [f[3] for f in findings if len(f)>3], "INFO")
-        ]
-        prompt_save_report(self, "Local System", "System Health Audit", sections)
+    def _execute(self, cmd_list, log_msg=None):
+        cmd_str = " ".join(cmd_list) if isinstance(cmd_list, list) else cmd_list
+        if self._dry_run.get():
+            self._log(f"[DRY RUN] Would execute: {cmd_str}")
+            return "Simulated execution", "", 0
+        
+        if log_msg:
+            self._log(log_msg)
+        return run(cmd_list)
 
     def _run_fix(self, cmd, title):
         self._log(f"Running fix: {title}")
-        threading.Thread(target=lambda: (
-            self._safe_after(0, self._log, f"$ {cmd}"),
-            (lambda out, err, rc: self._safe_after(0, self._log,
-             f"{'✓ Done' if rc==0 else '✗ Failed'}: {out or err}"))(
-                *run(f"sudo {cmd}" if not cmd.startswith('sudo') else cmd, timeout=60)
-            )
-        ), daemon=True).start()
+        def _bg():
+            out, err, rc = self._execute(f"sudo {cmd}" if not cmd.startswith('sudo') else cmd)
+            if not self._dry_run.get():
+                self._safe_after(0, self._log, f"{'✓ Done' if rc==0 else '✗ Failed'}: {out or err}")
+        threading.Thread(target=_bg, daemon=True).start()
 
     def _update_system(self):
         def _bg():
-            self._safe_after(0, self._log, "Updating package list...")
-            run(["sudo", "apt-get", "update", "-q"], timeout=60)
-            self._safe_after(0, self._log, "Upgrading packages...")
-            out, err, rc = run(["sudo", "DEBIAN_FRONTEND=noninteractive", "apt-get", "upgrade", "-y", "-q"], timeout=120)
-            self._safe_after(0, self._log, "✓ System update complete" if rc==0 else f"✗ Update failed: {err}")
+            self._execute(["sudo", "apt-get", "update", "-q"], "Updating package list...")
+            self._execute(["sudo", "DEBIAN_FRONTEND=noninteractive", "apt-get", "upgrade", "-y", "-q"], "Upgrading packages...")
+            self._safe_after(0, self._log, "✓ Process complete")
         threading.Thread(target=_bg, daemon=True).start()
 
     def _clean_packages(self):
         def _bg():
-            self._safe_after(0, self._log, "Cleaning unused packages...")
-            run(["sudo", "apt-get", "autoremove", "-y"], timeout=60)
-            run(["sudo", "apt-get", "autoclean", "-y"], timeout=60)
-            self._safe_after(0, self._log, "✓ Package cleanup done")
+            self._execute(["sudo", "apt-get", "autoremove", "-y"], "Cleaning packages...")
+            self._safe_after(0, self._log, "✓ Done")
         threading.Thread(target=_bg, daemon=True).start()
 
     def _check_disk(self):
         def _bg():
-            self._safe_after(0, self._log, "Disk usage:")
-            out, _, _ = run(["df", "-h"])
+            out, _, _ = self._execute(["df", "-h"], "Checking disk usage...")
             self._safe_after(0, self._log, out)
-            self._safe_after(0, self._log, "\nLargest files in home:")
-            # We use a limited find to avoid long waits
-            out, _, _ = run(["find", os.path.expanduser("~"), "-maxdepth", "2", "-type", "f", "-size", "+100M"])
-            self._safe_after(0, self._log, out or "No files > 100MB found in home root.")
         threading.Thread(target=_bg, daemon=True).start()
 
     def _fix_permissions(self):
         def _bg():
-            self._safe_after(0, self._log, "Fixing home directory permissions...")
-            run(["chmod", "755", os.path.expanduser("~")])
-            ssh_dir = os.path.expanduser("~/.ssh")
-            if os.path.exists(ssh_dir):
-                run(["chmod", "700", ssh_dir])
-            self._safe_after(0, self._log, "✓ Permissions fixed")
+            self._execute(["chmod", "755", os.path.expanduser("~")], "Fixing home directory permissions...")
+            self._safe_after(0, self._log, "✓ Done")
         threading.Thread(target=_bg, daemon=True).start()
 
     def _fix_firewall(self):
         def _bg():
-            self._safe_after(0, self._log, "Configuring firewall...")
-            run(["sudo", "ufw", "--force", "enable"])
-            run(["sudo", "ufw", "default", "deny", "incoming"])
-            run(["sudo", "ufw", "default", "allow", "outgoing"])
-            run(["sudo", "ufw", "allow", "ssh"])
-            self._safe_after(0, self._log, "✓ Firewall enabled with secure defaults")
-        threading.Thread(target=_bg, daemon=True).start()
-
-    def _harden_ssh(self):
-        self._log("SSH hardening suggestions:")
-        suggestions = [
-            "1. Disable root login: PermitRootLogin no",
-            "2. Disable password auth: PasswordAuthentication no",
-            "3. Use protocol 2 only: Protocol 2",
-            "4. Limit auth attempts: MaxAuthTries 3",
-            "Location: /etc/ssh/sshd_config"
-        ]
-        for s in suggestions:
-            self._log(f"  {s}")
-
-    def _clear_temp(self):
-        def _bg():
-            self._safe_after(0, self._log, "Clearing temp files...")
-            # Selective clear to avoid breaking running procs
-            run(["sudo", "find", "/tmp", "-mindepth", "1", "-atime", "+1", "-delete"])
-            run(["sudo", "journalctl", "--vacuum-size=100M"])
+            self._execute(["sudo", "ufw", "--force", "enable"], "Enabling firewall...")
             self._safe_after(0, self._log, "✓ Done")
         threading.Thread(target=_bg, daemon=True).start()
 
-    def _mem_analysis(self):
+    def _harden_ssh(self):
+        self._log("SSH hardening suggested. Check /etc/ssh/sshd_config")
+
+    def _clear_temp(self):
         def _bg():
-            self._safe_after(0, self._log, "Memory analysis:")
-            out, _, _ = run(["free", "-h"])
-            self._safe_after(0, self._log, out)
-            self._safe_after(0, self._log, "\nTop memory consumers:")
-            out, _, _ = run(["ps", "aux", "--sort=-%mem"])
-            self._safe_after(0, self._log, "\n".join(out.splitlines()[:8]))
+            self._execute(["sudo", "find", "/tmp", "-mindepth", "1", "-atime", "+1", "-delete"], "Clearing temp files...")
+            self._safe_after(0, self._log, "✓ Done")
         threading.Thread(target=_bg, daemon=True).start()

@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — Web-Based Remote Monitoring Interface
+Mint Scan v11.1 — Web-Based Remote Monitoring Interface
 Token-authenticated HTTP server on port 7777.
 Access from any device on the same network: http://<ip>:7777?token=XXXX
 
@@ -9,7 +9,7 @@ Security:
 - POST /api/data also requires X-Token header
 - Token displayed in UI and logged at startup
 """
-import threading, json, time, os, socket, secrets, string
+import threading, json, time, os, socket, secrets, string, ssl, subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from logger import get_logger
@@ -28,6 +28,29 @@ _shared_data_lock = __import__('threading').Lock()
 _server_token: str = ''   # generated when server starts
 
 
+def _ensure_certs():
+    """Generate self-signed SSL certs if they don't exist."""
+    base = os.path.expanduser('~/.mint_scan_web_certs')
+    os.makedirs(base, exist_ok=True)
+    key_path = os.path.join(base, 'server.key')
+    cert_path = os.path.join(base, 'server.crt')
+    
+    if not os.path.exists(key_path) or not os.path.exists(cert_path):
+        log.info("Generating self-signed SSL certificates...")
+        cmd = [
+            "openssl", "req", "-new", "-newkey", "rsa:2048", "-days", "365", 
+            "-nodes", "-x509", "-keyout", key_path, "-out", cert_path,
+            "-subj", "/C=ZA/ST=Gauteng/L=Pretoria/O=MintProjects/CN=mint-scan"
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True)
+            log.info(f"Certs generated: {cert_path}")
+        except Exception as e:
+            log.error(f"Failed to generate certs: {e}")
+            return None, None
+    return key_path, cert_path
+
+
 def _generate_token(length: int = 10) -> str:
     """Generate a cryptographically random alphanumeric token."""
     alphabet = string.ascii_letters + string.digits
@@ -40,7 +63,7 @@ DASHBOARD_HTML = '''<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Mint Scan v8 — Remote Monitor</title>
+<title>Mint Scan v11.1 — Remote Monitor</title>
 <style>
 :root{--bg:#05111f;--sf:#0a1f35;--ac:#00ffe0;--ok:#44ff99;--wn:#ff5555;--am:#ffcc44;--tx:#e8f4ff;--mu:#7fb8d8}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -200,7 +223,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-def start_server(port: int = DEFAULT_PORT) -> tuple[bool, str]:
+def start_server(port: int = DEFAULT_PORT, use_ssl: bool = False) -> tuple[bool, str]:
     """Start the server. Returns (success, token)."""
     global _server_instance, _server_thread, _server_token
     if _server_instance:
@@ -208,6 +231,18 @@ def start_server(port: int = DEFAULT_PORT) -> tuple[bool, str]:
     try:
         _server_token    = _generate_token(10)
         _server_instance = HTTPServer(('0.0.0.0', port), _Handler)
+        
+        if use_ssl:
+            key_path, cert_path = _ensure_certs()
+            if key_path and cert_path:
+                context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                context.load_cert_chain(certfile=cert_path, keyfile=key_path)
+                _server_instance.socket = context.wrap_socket(
+                    _server_instance.socket, server_side=True)
+                log.info("SSL enabled for web monitor")
+            else:
+                log.warning("SSL requested but certs missing — falling back to HTTP")
+
         _server_thread   = threading.Thread(
             target=_server_instance.serve_forever, daemon=True)
         _server_thread.start()
@@ -357,6 +392,12 @@ class WebMonitorScreen(ctk.CTkFrame):
             border_color=C['br'], text_color=C['tx'])
         self._port_entry.pack(side='left', padx=8)
         self._port_entry.insert(0, str(DEFAULT_PORT))
+        
+        self._use_ssl = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(cr, text="HTTPS", variable=self._use_ssl,
+                        font=MONO_SM, text_color=C['mu'],
+                        fg_color=C['ac'], border_color=C['br']).pack(side='left', padx=8)
+
         self._start_btn = Btn(cr, '▶ START', command=self._start, width=90)
         self._start_btn.pack(side='left', padx=4)
         self._stop_btn  = Btn(cr, '⏹ STOP', command=self._stop,
@@ -393,6 +434,8 @@ class WebMonitorScreen(ctk.CTkFrame):
             text_color=C['ok'] if running else C['mu'])
         if running:
             url = get_local_url(self._port)
+            if self._use_ssl.get():
+                url = url.replace('http://', 'https://')
             self._url_lbl.configure(text=url)
             self._token_lbl.configure(text=_server_token or '—')
             self._start_btn.configure(state='disabled')
@@ -408,7 +451,7 @@ class WebMonitorScreen(ctk.CTkFrame):
             self._port = int(self._port_entry.get())
         except ValueError:
             self._port = DEFAULT_PORT
-        ok, token = start_server(self._port)
+        ok, token = start_server(self._port, use_ssl=self._use_ssl.get())
         if ok:
             self._refresh_status()
 

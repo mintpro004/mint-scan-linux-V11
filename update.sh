@@ -19,7 +19,7 @@ echo -e "${NC}"
 if [ ! -d "$SCRIPT_DIR/.git" ]; then
     echo -e "${RED}ERROR: Not a git repository.${NC}"
     echo ""
-    echo "Mint Scan v8 must be installed via git clone:"
+    echo "Mint Scan v11.1 must be installed via git clone:"
     echo -e "  ${CYAN}git clone https://github.com/mintpro004/mint-scan-linux-V8.git ~/mint-scan-linux${NC}"
     echo -e "  ${CYAN}cd ~/mint-scan-linux && bash install.sh && bash run.sh${NC}"
     exit 1
@@ -85,7 +85,7 @@ bash install.sh
 echo ""
 echo -e "${GREEN}${BOLD}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║   ✓ Mint Scan v8 updated successfully                       ║"
+echo "║   ✓ Mint Scan v11.1 updated successfully                       ║"
 echo "║   Run: bash run.sh                                          ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"

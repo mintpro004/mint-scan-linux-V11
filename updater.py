@@ -1,5 +1,5 @@
 """
-Mint Scan v8.3.0 — Software Updater
+Mint Scan v11.1 — Software Updater
 Checks GitHub for updates via Releases API → Tags API → git log.
 Update delivery: git pull (auto-detects branch) OR zip download fallback.
 """
@@ -345,7 +345,7 @@ def do_zip_update(zip_url, log_fn=None):
 
         with zipfile.ZipFile(zip_path, 'r') as zf:
             names = zf.namelist()
-            # GitHub zips have a top-level dir like  repo-name-v8.3.0.0/
+            # GitHub zips have a top-level dir like  repo-name-v11.1.0/
             prefix = names[0].split('/')[0] + '/' if names else ''
             extracted = 0
             for name in names:
@@ -468,8 +468,21 @@ class UpdaterScreen(ctk.CTkFrame):
         self._action_frame = ctk.CTkFrame(self._status_outer, fg_color='transparent')
         self._action_frame.pack(fill='x', padx=12, pady=(0, 12))
 
+        # Changelog / What's New
+        SectionHeader(body, '03', "WHAT'S NEW").pack(
+            fill='x', padx=14, pady=(8, 4))
+        self._notes_card = Card(body)
+        self._notes_card.pack(fill='x', padx=14, pady=(0, 8))
+        self._notes_box = ctk.CTkTextbox(
+            self._notes_card, height=120,
+            font=('DejaVu Sans Mono', 9),
+            fg_color=C['bg'], text_color=C['tx'], border_width=0)
+        self._notes_box.pack(fill='x', padx=8, pady=8)
+        self._notes_box.insert('1.0', 'No changelog available.')
+        self._notes_box.configure(state='disabled')
+
         # Update log
-        SectionHeader(body, '03', 'UPDATE LOG').pack(
+        SectionHeader(body, '04', 'UPDATE LOG').pack(
             fill='x', padx=14, pady=(8, 4))
         log_card = Card(body)
         log_card.pack(fill='x', padx=14, pady=(0, 8))
@@ -481,7 +494,7 @@ class UpdaterScreen(ctk.CTkFrame):
         self._log_box.configure(state='disabled')
 
         # Manual instructions
-        SectionHeader(body, '04', 'MANUAL UPDATE COMMANDS').pack(
+        SectionHeader(body, '05', 'MANUAL UPDATE COMMANDS').pack(
             fill='x', padx=14, pady=(8, 4))
         mc = Card(body)
         mc.pack(fill='x', padx=14, pady=(0, 14))
@@ -541,10 +554,20 @@ class UpdaterScreen(ctk.CTkFrame):
                 text=f'⬆  UPDATE AVAILABLE  ·  v{result["latest"]}',
                 text_color=C['am'])
             self._ulog(f'Current: {result["current"]}  →  Latest: {result["latest"]}')
+            
             notes = result.get('notes', '')
             if notes:
+                self._notes_box.configure(state='normal')
+                self._notes_box.delete('1.0', 'end')
+                self._notes_box.insert('1.0', notes)
+                self._notes_box.configure(state='disabled')
                 for line in notes.splitlines()[:8]:
                     self._ulog(f'  {line}')
+            else:
+                self._notes_box.configure(state='normal')
+                self._notes_box.delete('1.0', 'end')
+                self._notes_box.insert('1.0', 'No release notes provided.')
+                self._notes_box.configure(state='disabled')
 
             # Action buttons row
             has_git  = os.path.isdir(os.path.join(BASE_DIR, '.git'))

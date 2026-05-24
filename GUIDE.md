@@ -1,8 +1,8 @@
 <div style="background-color: #ffffff; color: #000000; padding: 40px; font-family: sans-serif;">
 
-<h1 style="color: #0056b3; border-bottom: 2px solid #0056b3;">MINT SCAN v8.3.0 — USER GUIDE</h1>
+<h1 style="color: #0056b3; border-bottom: 2px solid #0056b3;">MINT SCAN v11.1.0 — USER GUIDE</h1>
 
-<p>Welcome to <strong>Mint Scan v8.3.0</strong>, the world-standard security auditing and system utility suite for Linux. This guide provides comprehensive instructions for installation, usage, and optimization.</p>
+<p>Welcome to <strong>Mint Scan v11.1.0</strong>, the world-standard security auditing and system utility suite for Linux. This guide provides comprehensive instructions for installation, usage, and optimization.</p>
 
 <h2 style="color: #0056b3;">1. Installation & Setup</h2>
 <p>Mint Scan is designed to run on Debian-based distributions, including Ubuntu, Kali Linux, and ChromeOS (Crostini).</p>

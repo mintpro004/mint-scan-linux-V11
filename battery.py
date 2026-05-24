@@ -26,6 +26,9 @@ class BatteryScreen(ctk.CTkFrame):
         self.app = app
         self._built = False
         self._history = []
+        self._last_pct = None
+        self._last_time = None
+        self._time_estimate = "Calculating..."
 
     def on_focus(self):
         if not self._built:
@@ -106,9 +109,44 @@ class BatteryScreen(ctk.CTkFrame):
         status = bat.get('status', 'Unknown')
         col    = C['ok'] if pct > 60 else C['am'] if pct > 20 else C['wn']
 
+        # Calculate time estimate
+        now = time.time()
+        if self._last_pct is not None and self._last_time is not None:
+            pct_diff = self._last_pct - pct
+            time_diff = now - self._last_time # seconds
+            
+            if abs(pct_diff) > 0 and time_diff > 10:
+                # Rate of change: pct per second
+                rate = pct_diff / time_diff
+                if status.lower() in ('discharging', 'discharge'):
+                    if rate > 0: # Losing charge
+                        rem_pct = pct
+                        rem_sec = rem_pct / rate
+                    else:
+                        rem_sec = 0
+                elif status.lower() in ('charging', 'charge'):
+                    if rate < 0: # Gaining charge
+                        rem_pct = 100 - pct
+                        rem_sec = rem_pct / abs(rate)
+                    else:
+                        rem_sec = 0
+                else:
+                    rem_sec = 0
+
+                if rem_sec > 0:
+                    h, m = divmod(int(rem_sec // 60), 60)
+                    self._time_estimate = f"{h}h {m}m remaining" if status.lower().startswith('dis') else f"{h}h {m}m to full"
+                else:
+                    self._time_estimate = "Stable"
+            elif pct_diff == 0 and time_diff > 60:
+                self._time_estimate = "Calculating..."
+        
+        self._last_pct = pct
+        self._last_time = now
+
         self.pct_lbl.configure(text=f"{pct}%", text_color=col)
         self.status_lbl.configure(
-            text=f"{status}  ·  Health: {bat.get('health','—')}  ·  {bat.get('tech','—')}",
+            text=f"{status}  ·  {self._time_estimate}  ·  Health: {bat.get('health','—')}",
             text_color=col)
         self.bat_bar.set(pct / 100)
         self.bat_bar.configure(progress_color=col)
@@ -129,6 +167,9 @@ class BatteryScreen(ctk.CTkFrame):
 
         # History
         self._history.append((time.strftime('%H:%M:%S'), pct))
+        if len(self._history) > 100:
+            self._history.pop(0)
+            
         for w in self.history_frame.winfo_children(): w.destroy()
         for ts, p in self._history[-15:]:
             row = ctk.CTkFrame(self.history_frame, fg_color='transparent')

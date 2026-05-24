@@ -1,15 +1,16 @@
 """
-Mint Scan v8 — Advanced Dashboard
+Mint Scan v11.1 — Advanced Dashboard
 Premium UI: animated score ring, live stat cards, real-time mini-charts,
 hex grid background, animated status indicators, advanced layout.
 """
 import tkinter as tk
 import customtkinter as ctk
-import threading, time, math, platform
-from widgets import (C, MONO, MONO_SM, MONO_LG, MONO_XL, ScrollableFrame,
+import threading, time, math, platform, os
+from widgets import (C, MONO, MONO_SM, MONO_LG, MONO_XL, FONT, ScrollableFrame,
                      Card, SectionHeader, InfoGrid, ResultBox, Btn)
 from utils import (get_system_info, get_public_ip_info, get_local_ip,
                    get_battery_info, get_open_ports, get_processes, run_cmd)
+from database import db
 
 
 # ── Canvas helpers ────────────────────────────────────────────────
@@ -145,26 +146,34 @@ class MiniChart(tk.Canvas):
 
 class StatCard(ctk.CTkFrame):
     """Premium stat card with icon, value, label, mini chart."""
-    def __init__(self, parent, icon, label, color=None, chart=True, **kw):
+    def __init__(self, parent, icon, label, color=None, chart=True, key=None, **kw):
         color = color or C['ac']
         super().__init__(parent, fg_color=C['sf'],
                          border_color=color, border_width=1,
                          corner_radius=8, **kw)
         self._color = color
+        self._key   = key
         # Top row: icon + value
         top = ctk.CTkFrame(self, fg_color='transparent')
         top.pack(fill='x', padx=10, pady=(10,0))
         ctk.CTkLabel(top, text=icon, font=('DejaVu Sans Mono', 16),
                      text_color=color).pack(side='left')
+        
         self._val = ctk.CTkLabel(top, text='—',
                                   font=('DejaVu Sans Mono', 18, 'bold'),
                                   text_color=color)
         self._val.pack(side='right')
+
         # Label + sub
         bot = ctk.CTkFrame(self, fg_color='transparent')
         bot.pack(fill='x', padx=10, pady=(0,4))
         ctk.CTkLabel(bot, text=label.upper(),
                      font=('DejaVu Sans Mono', 7), text_color=C['mu']).pack(side='left')
+        
+        # History button
+        if key:
+            Btn(bot, "◷", command=self._show_history, variant='ghost', width=20, height=20, font=(FONT, 8)).pack(side='right', padx=2)
+
         self._sub = ctk.CTkLabel(bot, text='',
                                   font=('DejaVu Sans Mono', 7), text_color=C['mu2'])
         self._sub.pack(side='right')
@@ -174,6 +183,33 @@ class StatCard(ctk.CTkFrame):
             self._chart.pack(fill='x', padx=2, pady=(0,4))
         else:
             self._chart = None
+
+    def _show_history(self):
+        pop = ctk.CTkToplevel(self)
+        pop.title(f"24H {self._key.upper()} History")
+        pop.geometry("400x300")
+        pop.configure(fg_color=C['bg'])
+        pop.attributes('-topmost', True)
+        
+        inner = ctk.CTkFrame(pop, fg_color='transparent')
+        inner.pack(fill='both', expand=True, padx=20, pady=20)
+        
+        ctk.CTkLabel(inner, text=f"{self._key.upper()} TREND (LAST 24 ENTRIES)", 
+                     font=('DejaVu Sans Mono', 12, 'bold'), text_color=self._color).pack(pady=(0,10))
+        
+        chart = MiniChart(inner, color=self._color, height=180)
+        chart.pack(fill='both', expand=True)
+        
+        # Load data from DB
+        history = db.get_stats_history(limit=24)
+        if history:
+            vals = [row[f'{self._key}_pct'] for row in reversed(history)]
+            for v in vals:
+                chart.push(v)
+        else:
+            ctk.CTkLabel(inner, text="No historical data found yet.", font=MONO_SM, text_color=C['mu']).pack()
+
+        Btn(inner, "CLOSE", command=pop.destroy, variant='ghost', width=100).pack(pady=10)
 
     def update(self, val, sub='', push_chart=None):
         self._val.configure(text=str(val))
@@ -266,6 +302,10 @@ class DashScreen(ctk.CTkFrame):
         Btn(hdr, '⚙ SETTINGS',
             command=lambda: self.app._switch_tab('settings'),
             variant='ghost', width=110).pack(side='right', padx=4)
+        
+        # System Controls
+        Btn(hdr, '⏻', command=self._shutdown, variant='danger', width=40, font=('Arial', 14)).pack(side='right', padx=4)
+        Btn(hdr, '⟳', command=self._restart, variant='warning', width=40, font=('Arial', 14)).pack(side='right', padx=4)
 
         # ── Body ────────────────────────────────────────────────
         self.scroll = ScrollableFrame(self)
@@ -295,8 +335,8 @@ class DashScreen(ctk.CTkFrame):
         cards_bot = ctk.CTkFrame(cards_frame, fg_color='transparent')
         cards_bot.pack(fill='x')
 
-        self._card_cpu = StatCard(cards_top, '💻', 'CPU Usage',   color=C['ac'])
-        self._card_mem = StatCard(cards_top, '🧠', 'RAM',         color=C['bl'])
+        self._card_cpu = StatCard(cards_top, '💻', 'CPU Usage',   color=C['ac'], key='cpu')
+        self._card_mem = StatCard(cards_top, '🧠', 'RAM',         color=C['bl'], key='mem')
         self._card_bat = StatCard(cards_bot, '🔋', 'Battery',     color=C['ok'])
         self._card_net = StatCard(cards_bot, '📡', 'Network',     color=C['am'])
         for c in [self._card_cpu, self._card_mem]:
@@ -369,6 +409,29 @@ class DashScreen(ctk.CTkFrame):
     def _load(self):
         threading.Thread(target=self._fetch, daemon=True).start()
 
+    def _shutdown(self):
+        self._alog_sys("SYSTEM SHUTDOWN INITIATED...")
+        def _do():
+            time.sleep(1.5)
+            # Try various shutdown commands
+            for cmd in [['sudo', '-n', 'shutdown', 'now'], ['pkexec', 'shutdown', 'now'], ['shutdown', 'now']]:
+                _, _, rc = run_cmd(cmd, timeout=5)
+                if rc == 0: break
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _restart(self):
+        self._alog_sys("SYSTEM REBOOT INITIATED...")
+        def _do():
+            time.sleep(1.5)
+            for cmd in [['sudo', '-n', 'reboot'], ['pkexec', 'reboot'], ['reboot']]:
+                _, _, rc = run_cmd(cmd, timeout=5)
+                if rc == 0: break
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _alog_sys(self, msg):
+        self._status_lbl.configure(text=msg, text_color=C['wn'])
+        self._pulse.set_color(C['wn'])
+
     def _fetch(self):
         from concurrent.futures import ThreadPoolExecutor
         def _get_cpu():
@@ -433,30 +496,39 @@ class DashScreen(ctk.CTkFrame):
 
     def _render(self, sysinfo, bat, local_ip, ipinfo, ports, procs,
                 cpu=0, mem_pct=0, fw_ok=False, pkg_n=0):
-        # ── Score calculation ──────────────────────────────────
+        # ── Advanced Score Calculation ──────────────────────────
         score = 100
-        danger_ports = {'23','4444','5555','1337','31337','7547'}
+        danger_ports = {'23','4444','5555','1337','31337','7547','8888'}
         risky_ports  = set(str(p['port']) for p in ports if str(p['port']) in danger_ports)
         score -= len(risky_ports) * 15
         
-        # Check firewall
-        if not fw_ok: score -= 20
+        # Security Penalties
+        if not fw_ok: score -= 25 # Critical
+        if os.getuid() == 0: score -= 10 # Root usage risk
+        if pkg_n > 50: score -= 20
+        elif pkg_n > 0: score -= 10
         
-        # Check updates
-        if pkg_n > 20: score -= 10
-        elif pkg_n > 0: score -= 5
+        # Health Penalties
+        if mem_pct > 90: score -= 10
+        if cpu > 90: score -= 5
         
+        # Battery Health
         if bat and bat.get('health','').lower() not in ('good','unknown','—',''):
             score -= 10
         
+        # Chromebook context
+        from utils import _is_crostini
+        if _is_crostini():
+            score += 5 # ChromeOS sandboxing bonus
+            
         score = max(0, min(100, score))
-        col = C['ok'] if score >= 75 else C['am'] if score >= 50 else C['wn']
+        col = C['ok'] if score >= 85 else C['am'] if score >= 65 else C['wn']
 
         self._score_ring.set_score(score)
         self.app.update_score(score)
 
-        status = ('SYSTEM SECURE' if score >= 75 else
-                  'ATTENTION NEEDED' if score >= 50 else 'CRITICAL')
+        status = ('SYSTEM SECURE' if score >= 85 else
+                  'WARNING' if score >= 65 else 'RISK DETECTED' if score >= 40 else 'CRITICAL')
         self._status_lbl.configure(text=status, text_color=col)
         self._pulse.set_color(col)
 
@@ -581,6 +653,13 @@ class DashScreen(ctk.CTkFrame):
             mem_out, _, _ = run_cmd("free | grep Mem | awk '{printf \"%.0f\",$3/$2*100}'")
             try: mem = int(mem_out.strip() or 0)
             except: mem = 0
+            
+            # Log to DB
+            try:
+                # Mock network rx/tx for now since we're just doing CPU/MEM
+                db.log_stats(cpu, mem, 0, 0)
+            except: pass
+
             def _ui():
                 try:
                     if not self.winfo_exists():

@@ -1,92 +1,70 @@
 """
-Mint Scan — Wireless Sync Server
-Runs a local HTTP server on the Chromebook/Linux machine.
-The Android companion app (or any browser on the phone) connects over Wi-Fi
-to sync calls, SMS, contacts, battery, and device info.
+Mint Scan v11.1 — Wireless Sync
+Local server for Android companion app to sync calls, SMS, and battery state.
 """
 import tkinter as tk
 import customtkinter as ctk
-import threading, subprocess, socket, os, time, json, re
+import threading, time, socket, subprocess, json
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import urlparse, parse_qs
-from widgets import ScrollableFrame, Card, SectionHeader, InfoGrid, ResultBox, Btn, C, MONO, MONO_SM
-from utils import copy_to_clipboard, run_cmd as run
+from widgets import C, MONO_SM, Btn, Card, SectionHeader, InfoGrid
+from utils import get_local_ip, copy_to_clipboard
 
-# ── Global sync data store ─────────────────────────────────────────
-_sync_data = {
-    'device':   {},
-    'calls':    [],
-    'sms':      [],
-    'contacts': [],
-    'battery':  {},
-    'wifi':     [],
-    'location': {},
-    'last_sync': None,
-}
+def run(cmd):
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    out, err = p.communicate()
+    return out, err, p.returncode
+
 _server_instance = None
+_sync_data = {
+    'device': {},
+    'calls': [],
+    'sms': [],
+    'contacts': [],
+    'battery': {},
+    'wifi': [],
+    'network': {},
+    'location': {},
+    'last_sync': None
+}
 
-
-def get_local_ip():
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return '127.0.0.1'
-
-
-# ── HTTP Request Handler ───────────────────────────────────────────
 class SyncHandler(BaseHTTPRequestHandler):
-    """Handles HTTP requests from the Android companion app"""
-
-    def log_message(self, fmt, *args):
-        pass  # Suppress default HTTP logging
+    def log_message(self, format, *args): return # Silence server logs
 
     def _send_json(self, data, status=200):
-        body = json.dumps(data).encode()
         self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', len(body))
+        self.send_header('Content-type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(json.dumps(data).encode())
 
-    def _send_page(self, html):
-        body = html.encode()
+    def do_OPTIONS(self):
         self.send_response(200)
-        self.send_header('Content-Type', 'text/html; charset=utf-8')
-        self.send_header('Content-Length', len(body))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
-        self.wfile.write(body)
 
     def do_GET(self):
-        parsed = urlparse(self.path)
-        path   = parsed.path
-
-        if path == '/':
-            self._send_page(self._home_page())
-        elif path == '/status':
-            self._send_json({'status': 'online', 'version': '7.0',
-                             'name': 'Mint Scan Server'})
-        elif path == '/data':
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(self.server.screen._home_page().encode())
+        elif self.path == '/data':
             self._send_json(_sync_data)
         else:
-            self._send_json({'error': 'not found'}, 404)
+            self.send_error(404)
 
     def do_POST(self):
-        length  = int(self.headers.get('Content-Length', 0))
-        body    = self.rfile.read(length)
-        parsed  = urlparse(self.path)
-        path    = parsed.path
-
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
         try:
-            payload = json.loads(body) if body else {}
-        except Exception:
-            self._send_json({'error': 'invalid JSON'}, 400)
+            payload = json.loads(post_data.decode('utf-8'))
+        except:
+            self._send_json({'error': 'invalid json'}, 400)
             return
 
+        path = self.path
         if path == '/sync/device':
             _sync_data['device']    = payload
             _sync_data['last_sync'] = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -170,7 +148,7 @@ class SyncHandler(BaseHTTPRequestHandler):
 </head>
 <body>
 <h1>[ MINT SCAN ]</h1>
-<div class="sub">Wireless Sync v8.3.0 — Local Secure Tunnel</div>
+<div class="sub">Wireless Sync v11.1 — Local Secure Tunnel</div>
 
 <div class="card">
   <div class="label">Server Status</div>
@@ -207,23 +185,18 @@ class SyncHandler(BaseHTTPRequestHandler):
 </html>"""
 
 
-# ══════════════════════════════════════════════════════════════════
-# WIRELESS SYNC SCREEN
-# ══════════════════════════════════════════════════════════════════
+class ScrollableFrame(ctk.CTkScrollableFrame):
+    def __init__(self, master, **kwargs):
+        super().__init__(master, fg_color='transparent', **kwargs)
+
 class WirelessScreen(ctk.CTkFrame):
     def _safe_after(self, delay, fn, *args):
-        """Thread-safe after() that guards against destroyed widgets."""
         def _guarded():
             try:
-                if self.winfo_exists():
-                    fn(*args)
-            except Exception:
-                pass
-        try:
-            self.after(delay, _guarded)
-        except Exception:
-            pass
-
+                if self.winfo_exists(): fn(*args)
+            except: pass
+        try: self.after(delay, _guarded)
+        except: pass
 
     def __init__(self, parent, app):
         super().__init__(parent, fg_color=C['bg'], corner_radius=0)
@@ -231,20 +204,21 @@ class WirelessScreen(ctk.CTkFrame):
         self._built  = False
         self._server = None
         self._port   = 8765
+        self._polling = False
 
     def on_focus(self):
         if not self._built:
             self._build()
             self._built = True
         self._refresh_status()
+        self._polling = True
+        if _server_instance:
+            self._poll_data()
 
     def on_blur(self):
-        """Called when switching away from this tab — stop background work."""
-        pass
-
+        self._polling = False
 
     def _build(self):
-        # ── Header ──────────────────────────────────────────────
         hdr = ctk.CTkFrame(self, fg_color=C['sf'], height=48, corner_radius=0)
         hdr.pack(fill='x')
         ctk.CTkLabel(hdr, text="📡  WIRELESS SYNC",
@@ -253,106 +227,56 @@ class WirelessScreen(ctk.CTkFrame):
         self._status_dot = ctk.CTkLabel(hdr, text="● OFFLINE",
                                          font=MONO_SM, text_color=C['wn'])
         self._status_dot.pack(side='left', padx=8)
-        self._stop_btn = Btn(hdr, "⏹ STOP SERVER",
-                             command=self._stop_server,
-                             variant='danger', width=130)
+        
+        self._stop_btn = Btn(hdr, "⏹ STOP", command=self._stop_server, variant='danger', width=80)
         self._stop_btn.pack(side='right', padx=4, pady=6)
         self._stop_btn.configure(state='disabled')
-        self._start_btn = Btn(hdr, "▶ START SERVER",
-                              command=self._start_server, width=130)
+        self._start_btn = Btn(hdr, "▶ START", command=self._start_server, width=80)
         self._start_btn.pack(side='right', padx=4, pady=6)
 
         self.scroll = ScrollableFrame(self)
         self.scroll.pack(fill='both', expand=True)
         body = self.scroll
 
-        # ── How it works ──────────────────────────────────────────
-        SectionHeader(body, '01', 'HOW IT WORKS').pack(fill='x', padx=14, pady=(14,4))
-        how = Card(body, accent=C['bl'])
-        how.pack(fill='x', padx=14, pady=(0,8))
-        ctk.CTkLabel(how,
-            text="Mint Scan runs a Wi-Fi sync server directly on your Linux machine.\n"
-                 "Your Android phone connects to it over your home Wi-Fi — no USB needed.\n\n"
-                 "STEP 1: Tap ▶ START SERVER below.\n"
-                 "STEP 2: Open the URL shown on your phone's browser.\n"
-                 "STEP 3: The companion app loads instantly — battery, network, sync ready.\n\n"
-                 "For USB/ADB connection (Android 16+), use the USB Sync tab instead.\n"
-                 "Both phone and Chromebook must be on the SAME Wi-Fi network.",
-            font=('DejaVu Sans Mono',10), text_color=C['tx'], justify='left'
-        ).pack(anchor='w', padx=12, pady=(10,10))
-
-        # ── Server connection info ────────────────────────────────
-        SectionHeader(body, '02', 'SERVER CONNECTION').pack(fill='x', padx=14, pady=(10,4))
+        SectionHeader(body, '01', 'SERVER CONFIG').pack(fill='x', padx=14, pady=(14,4))
         self._conn_card = Card(body)
         self._conn_card.pack(fill='x', padx=14, pady=(0,8))
-        self._conn_info = ctk.CTkLabel(self._conn_card,
-            text="Server is offline. Tap ▶ START SERVER to begin.",
-            font=MONO_SM, text_color=C['mu'])
-        self._conn_info.pack(padx=12, pady=16)
-
-        # ── Port setting ──────────────────────────────────────────
+        
         port_row = ctk.CTkFrame(self._conn_card, fg_color='transparent')
-        port_row.pack(fill='x', padx=12, pady=(0,10))
-        ctk.CTkLabel(port_row, text="PORT:", font=MONO_SM,
-                     text_color=C['mu']).pack(side='left')
-        self._port_entry = ctk.CTkEntry(port_row, width=80,
-                                         font=MONO_SM,
-                                         fg_color=C['bg'],
-                                         border_color=C['br'],
-                                         text_color=C['tx'])
+        port_row.pack(fill='x', padx=12, pady=10)
+        ctk.CTkLabel(port_row, text="PORT:", font=MONO_SM, text_color=C['mu']).pack(side='left')
+        self._port_entry = ctk.CTkEntry(port_row, width=80, font=MONO_SM, fg_color=C['bg'], border_color=C['br'])
         self._port_entry.pack(side='left', padx=8)
         self._port_entry.insert(0, str(self._port))
-        ctk.CTkLabel(port_row,
-            text="(default 8765 — change if blocked by firewall)",
-            font=('DejaVu Sans Mono',8), text_color=C['mu']).pack(side='left')
+        
+        SectionHeader(body, '02', 'CONNECTION QR').pack(fill='x', padx=14, pady=(10,4))
+        qr_card = Card(body)
+        qr_card.pack(fill='x', padx=14, pady=(0,8))
 
-        # ── QR / URL ──────────────────────────────────────────────
-        SectionHeader(body, '03', 'PHONE CONNECTION').pack(fill='x', padx=14, pady=(10,4))
-        self._phone_card = Card(body)
-        self._phone_card.pack(fill='x', padx=14, pady=(0,8))
-        ctk.CTkLabel(self._phone_card,
-            text="Start the server to see connection URL and QR code instructions",
-            font=MONO_SM, text_color=C['mu']).pack(padx=12, pady=16)
+        # Crostini Warning
+        from utils import _is_crostini
+        if _is_crostini():
+            warn = ctk.CTkFrame(qr_card, fg_color=C['wng'], corner_radius=6, border_width=1, border_color=C['wn'])
+            warn.pack(fill='x', padx=12, pady=(12,0))
+            ctk.CTkLabel(warn, text="CHROMEBOOK DETECTED", font=(FONT, 10, 'bold'), text_color=C['wn']).pack(anchor='w', padx=10, pady=(5,0))
+            ctk.CTkLabel(warn, text="To sync, you MUST forward the port in ChromeOS Settings:\nSettings → Developers → Linux → Port Forwarding → Add 8765",
+                         font=(FONT, 9), text_color=C['tx'], justify='left').pack(anchor='w', padx=10, pady=(0,5))
+        
+        self.qr_canvas = tk.Canvas(qr_card, width=200, height=200, bg='white', highlightthickness=0)
+        self.qr_canvas.pack(pady=10)
+        
+        # Make the URL label clickable/editable
+        self._qr_msg = ctk.CTkLabel(qr_card, text="Start server to generate QR", font=MONO_SM, text_color=C['mu'], cursor='hand2')
+        self._qr_msg.pack(pady=(0,10))
+        self._qr_msg.bind("<Button-1>", self._edit_url)
 
-        # ── Live sync data ────────────────────────────────────────
-        SectionHeader(body, '04', 'SYNCED DATA').pack(fill='x', padx=14, pady=(10,4))
+        SectionHeader(body, '03', 'SYNCED DATA').pack(fill='x', padx=14, pady=(10,4))
         self._data_frame = ctk.CTkFrame(body, fg_color='transparent')
         self._data_frame.pack(fill='x', padx=14, pady=(0,8))
-        ctk.CTkLabel(self._data_frame,
-            text="No data synced yet. Start the server and open the URL on your phone.",
-            font=MONO_SM, text_color=C['mu']).pack(pady=8)
 
-        # ── Open on Phone ─────────────────────────────────────────
-        SectionHeader(body, '05', 'OPEN COMPANION ON PHONE').pack(fill='x', padx=14, pady=(10,4))
-        comp_card = Card(body, accent=C['ac'])
-        comp_card.pack(fill='x', padx=14, pady=(0,8))
-        ctk.CTkLabel(comp_card,
-            text="📱  HOW TO OPEN ON YOUR PHONE:",
-            font=('DejaVu Sans Mono',11,'bold'), text_color=C['ac']
-        ).pack(anchor='w', padx=12, pady=(12,4))
-        ctk.CTkLabel(comp_card,
-            text="Method A — Browser (Wi-Fi):\n"
-                 "  1. Start the server above\n"
-                 "  2. Open the URL shown in your phone's browser\n"
-                 "  3. The companion app loads instantly — no install needed\n\n"
-                 "Method B — USB (ADB, works on Android 16):\n"
-                 "  1. Connect phone via USB with USB Debugging enabled\n"
-                 "  2. Go to USB Sync tab → tap 🚀 OPEN COMPANION ON PHONE\n"
-                 "  3. Served via ADB port-forward — bypasses all file restrictions",
-            font=('DejaVu Sans Mono',9), text_color=C['tx'], justify='left'
-        ).pack(anchor='w', padx=12, pady=(0,12))
-
-        # ── Sync log ──────────────────────────────────────────────
-        SectionHeader(body, '06', 'SYNC LOG').pack(fill='x', padx=14, pady=(10,4))
-        log_card = Card(body)
-        log_card.pack(fill='x', padx=14, pady=(0,14))
-        self._log = ctk.CTkTextbox(log_card, height=160,
-                                    font=('DejaVu Sans Mono',9),
-                                    fg_color=C['bg'],
-                                    text_color=C['ok'],
-                                    border_width=0)
-        self._log.pack(fill='x', padx=8, pady=8)
-        self._log.configure(state='disabled')
+        SectionHeader(body, '04', 'LOGS').pack(fill='x', padx=14, pady=(10,4))
+        self._log = ctk.CTkTextbox(body, height=120, font=('DejaVu Sans Mono',9), fg_color=C['sf'], text_color=C['ok'])
+        self._log.pack(fill='x', padx=14, pady=(0,14))
 
     def _log_msg(self, msg):
         self._log.configure(state='normal')
@@ -362,33 +286,21 @@ class WirelessScreen(ctk.CTkFrame):
 
     def _start_server(self):
         global _server_instance
-        try:
-            self._port = int(self._port_entry.get())
-        except ValueError:
-            self._port = 8765
-
-        if _server_instance:
-            self._log_msg("Server already running")
-            return
-
+        try: self._port = int(self._port_entry.get())
+        except: self._port = 8765
+        
         try:
             _server_instance = HTTPServer(('0.0.0.0', self._port), SyncHandler)
-        except OSError as e:
-            self._log_msg(f"✗ Could not start server: {e}")
-            self._log_msg(f"Try a different port (e.g. 8766)")
-            return
-
-        self._server_thread = threading.Thread(
-            target=_server_instance.serve_forever, daemon=True)
-        self._server_thread.start()
-
-        self._log_msg(f"✓ Server started on port {self._port}")
-        self._start_btn.configure(state='disabled', text='RUNNING...')
-        self._stop_btn.configure(state='normal')
-        self._status_dot.configure(text='● ONLINE', text_color=C['ok'])
-        self._refresh_status()
-        # Poll for incoming data
-        self._poll_data()
+            _server_instance.screen = self
+            threading.Thread(target=_server_instance.serve_forever, daemon=True).start()
+            self._log_msg(f"Server started on port {self._port}")
+            self._start_btn.configure(state='disabled')
+            self._stop_btn.configure(state='normal')
+            self._status_dot.configure(text='● ONLINE', text_color=C['ok'])
+            self._refresh_status()
+            self._poll_data()
+        except Exception as e:
+            self._log_msg(f"Error: {e}")
 
     def _stop_server(self):
         global _server_instance
@@ -396,145 +308,63 @@ class WirelessScreen(ctk.CTkFrame):
             _server_instance.shutdown()
             _server_instance = None
         self._log_msg("Server stopped")
-        self._start_btn.configure(state='normal', text='▶ START SERVER')
+        self._start_btn.configure(state='normal')
         self._stop_btn.configure(state='disabled')
         self._status_dot.configure(text='● OFFLINE', text_color=C['wn'])
 
-    def _fix_firewall(self):
-        self._log_msg("Allowing port 8765 through firewall...")
-        def _bg():
-            out, err, rc = run(['sudo', 'ufw', 'allow', '8765/tcp'])
-            if rc == 0:
-                self._safe_after(0, self._log_msg, "✓ Firewall updated (port 8765 allowed)")
-            else:
-                self._safe_after(0, self._log_msg, f"✗ Firewall update failed: {err or out}")
-        threading.Thread(target=_bg, daemon=True).start()
+    def _draw_qr(self, url):
+        self.qr_canvas.delete('all')
+        try:
+            import qrcode
+            from PIL import ImageTk, Image
+            
+            qr = qrcode.QRCode(version=1, box_size=4, border=2)
+            qr.add_data(url)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            # Convert to PhotoImage
+            self._qr_img = ImageTk.PhotoImage(img)
+            self.qr_canvas.create_image(100, 100, image=self._qr_img)
+            log.info(f"Generated QR code for {url}")
+        except Exception as e:
+            # Fallback if libraries fail
+            self.qr_canvas.create_text(100, 100, text="QR ERROR", font=('Arial', 12, 'bold'))
+            self.qr_canvas.create_text(100, 130, text=str(e), font=('Arial', 8), width=180)
+            log.error(f"QR generation failed: {e}")
+
+    def _edit_url(self, event=None):
+        if not _server_instance: return
+        dialog = ctk.CTkInputDialog(text="Enter the Chromebook's LAN IP (e.g. 192.168.1.15):\n(Leave empty to reset to auto-detect)", title="Manual IP Override")
+        manual_ip = dialog.get_input()
+        if manual_ip is not None:
+            self._manual_ip = manual_ip.strip()
+            self._refresh_status()
 
     def _refresh_status(self):
-        ip   = get_local_ip()
-        port = self._port
-        running = _server_instance is not None
-
-        # Update connection info
-        for w in self._conn_card.winfo_children():
-            if isinstance(w, ctk.CTkLabel) and 'Server is' in (w.cget('text') or ''):
-                w.destroy()
-            if isinstance(w, InfoGrid):
-                w.destroy()
-
-        if running:
-            url = f"http://{ip}:{port}"
-            InfoGrid(self._conn_card, [
-                ('YOUR IP',   ip,           C['ok']),
-                ('PORT',      str(port),    C['ac']),
-                ('STATUS',    'ONLINE',     C['ok']),
-            ], columns=3).pack(fill='x', padx=8, pady=(10,4))
-            
-            url_row = ctk.CTkFrame(self._conn_card, fg_color='transparent')
-            url_row.pack(fill='x', padx=12, pady=(0,10))
-            ctk.CTkLabel(url_row, text=f"URL: {url}", font=MONO_SM, text_color=C['ac']).pack(side='left')
-            Btn(url_row, "📋", command=lambda: copy_to_clipboard(url), variant='ghost', width=30).pack(side='left', padx=6)
-            Btn(url_row, "🔥 FIX FIREWALL", command=self._fix_firewall, variant='warning', width=120).pack(side='right')
-
-            # Update phone card
-            for w in self._phone_card.winfo_children(): w.destroy()
-            ctk.CTkLabel(self._phone_card,
-                text="OPEN THIS URL ON YOUR PHONE'S BROWSER:",
-                font=('DejaVu Sans Mono',9,'bold'), text_color=C['mu']
-            ).pack(anchor='w', padx=12, pady=(12,4))
-            
-            big_row = ctk.CTkFrame(self._phone_card, fg_color='transparent')
-            big_row.pack(anchor='w', padx=12, pady=(0,4))
-            ctk.CTkLabel(big_row, text=url, font=('DejaVu Sans Mono',18,'bold'), text_color=C['ac']).pack(side='left')
-            Btn(big_row, "📋", command=lambda: copy_to_clipboard(url), variant='ghost', width=30).pack(side='left', padx=10)
-
-            ctk.CTkLabel(self._phone_card,
-                text=f"Your phone and Chromebook must be on the SAME Wi-Fi network.\n"
-                     f"If you can't reach the URL, tap FIX FIREWALL above.",
-                font=('DejaVu Sans Mono',9), text_color=C['mu'], justify='left'
-            ).pack(anchor='w', padx=12, pady=(0,12))
+        ip = getattr(self, '_manual_ip', '') or get_local_ip()
+        url = f"http://{ip}:{self._port}"
+        if _server_instance:
+            self._draw_qr(url)
+            self._qr_msg.configure(text=f"CONNECT: {url}", text_color=C['ac'])
         else:
-            self._conn_info = ctk.CTkLabel(self._conn_card,
-                text="Server is offline. Tap ▶ START SERVER to begin.",
-                font=MONO_SM, text_color=C['mu'])
-            self._conn_info.pack(padx=12, pady=16)
+            self.qr_canvas.delete('all')
+            self._qr_msg.configure(text="Start server to generate QR", text_color=C['mu'])
 
     def _poll_data(self):
-        """Check for new sync data every 3 seconds"""
-        if _server_instance is None:
-            return
-        self._render_sync_data()
-        self.after(3000, self._poll_data)
+        if _server_instance and self._polling:
+            self._render_sync_data()
+            self.after(3000, self._poll_data)
 
     def _render_sync_data(self):
         for w in self._data_frame.winfo_children(): w.destroy()
-
         last = _sync_data.get('last_sync')
         if not last:
-            ctk.CTkLabel(self._data_frame,
-                text="No data synced yet. Open the server URL on your phone.",
-                font=MONO_SM, text_color=C['mu']).pack(pady=8)
+            ctk.CTkLabel(self._data_frame, text="Waiting for device sync...", font=MONO_SM, text_color=C['mu']).pack(pady=10)
             return
-
-        device   = _sync_data.get('device', {})
-        battery  = _sync_data.get('battery', {})
-        calls    = _sync_data.get('calls', [])
-        sms      = _sync_data.get('sms', [])
-        contacts = _sync_data.get('contacts', [])
-
-        # Summary grid
+        
         InfoGrid(self._data_frame, [
-            ('DEVICE',    device.get('model', '—'),  C['ac']),
-            ('ANDROID',   device.get('android', '—'), C['tx']),
-            ('BATTERY',   f"{battery.get('level','—')}%",
-             C['ok'] if int(battery.get('level',50) or 50) > 20 else C['wn']),
-            ('CHARGING',  'Yes' if battery.get('charging') else 'No', C['tx']),
-            ('CALLS',     len(calls),   C['ac']),
-            ('SMS',       len(sms),     C['ac']),
-            ('CONTACTS',  len(contacts),C['ac']),
-            ('LAST SYNC', last,         C['ok']),
-        ], columns=4).pack(fill='x', pady=(0,8))
-
-        # Show recent calls
-        if calls:
-            ctk.CTkLabel(self._data_frame,
-                text=f"Recent calls ({len(calls)}):",
-                font=('DejaVu Sans Mono',9,'bold'), text_color=C['ac']
-            ).pack(anchor='w', pady=(4,2))
-            for call in calls[:5]:
-                num  = call.get('number','Unknown')
-                name = call.get('name','')
-                dur  = call.get('duration','')
-                ctk.CTkLabel(self._data_frame,
-                    text=f"  📞 {name or num}  {dur}",
-                    font=MONO_SM, text_color=C['tx']
-                ).pack(anchor='w')
-
-        # Show recent SMS
-        if sms:
-            ctk.CTkLabel(self._data_frame,
-                text=f"\nRecent messages ({len(sms)}):",
-                font=('DejaVu Sans Mono',9,'bold'), text_color=C['ac']
-            ).pack(anchor='w', pady=(8,2))
-            for msg in sms[:3]:
-                addr = msg.get('address','?')
-                body = (msg.get('body','') or '')[:60]
-                ctk.CTkLabel(self._data_frame,
-                    text=f"  💬 {addr}: {body}",
-                    font=MONO_SM, text_color=C['tx']
-                ).pack(anchor='w')
-
-        self._log_msg(f"Data refreshed — {len(calls)} calls, {len(sms)} SMS")
-
-    def _do_usb_install(self, path):
-        out, err = subprocess.Popen(
-            f"adb install -r '{path}'",
-            shell=True, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True
-        ).communicate()
-        if 'Success' in out:
-            self._safe_after(0, self._log_msg,
-                       "✓ Companion APK installed on phone!")
-        else:
-            self._safe_after(0, self._log_msg,
-                       f"Install result: {out or err}")
+            ('MODEL', _sync_data['device'].get('model','—'), C['ac']),
+            ('BATTERY', f"{_sync_data['battery'].get('level','—')}%", C['ok']),
+            ('LAST SYNC', last, C['tx'])
+        ], columns=3).pack(fill='x')

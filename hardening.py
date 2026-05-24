@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — Security Hardening Profiles
+Mint Scan v11.1 — Security Hardening Profiles
 Automated one-click security configurations.
 """
 import customtkinter as ctk
@@ -13,11 +13,15 @@ class HardeningScreen(ctk.CTkFrame):
         super().__init__(parent, fg_color=C['bg'], corner_radius=0)
         self.app = app
         self._built = False
+        self._applying = False
 
     def on_focus(self):
         if not self._built:
             self._build()
             self._built = True
+
+    def on_blur(self):
+        pass
 
     def _build(self):
         hdr = ctk.CTkFrame(self, fg_color=C['sf'], height=48, corner_radius=0)
@@ -28,6 +32,7 @@ class HardeningScreen(ctk.CTkFrame):
 
         body = ScrollableFrame(self)
         body.pack(fill='both', expand=True)
+        self._body_frame = body
 
         SectionHeader(body, '01', 'HARDENING PROFILES').pack(fill='x', padx=14, pady=(14, 4))
         
@@ -59,6 +64,7 @@ class HardeningScreen(ctk.CTkFrame):
             ])
         ]
 
+        self._p_btns = []
         for name, desc, var, cmds in profiles:
             p_card = Card(body)
             p_card.pack(fill='x', padx=14, pady=4)
@@ -66,14 +72,20 @@ class HardeningScreen(ctk.CTkFrame):
             ctk.CTkLabel(p_card, text=name.upper(), font=('DejaVu Sans Mono', 12, 'bold'), text_color=C['ac']).pack(anchor='w', padx=12, pady=(10,2))
             ctk.CTkLabel(p_card, text=desc, font=MONO_SM, text_color=C['mu']).pack(anchor='w', padx=12, pady=(0,8))
             
-            Btn(p_card, f'APPLY {name.upper()} PROFILE', 
+            btn = Btn(p_card, f'APPLY {name.upper()} PROFILE', 
                 command=lambda c=cmds, n=name: self._apply_profile(n, c),
-                variant=var, width=220).pack(anchor='w', padx=12, pady=(0,12))
+                variant=var, width=220)
+            btn.pack(anchor='w', padx=12, pady=(0,12))
+            self._p_btns.append(btn)
 
         self.res_box = ctk.CTkFrame(body, fg_color='transparent')
         self.res_box.pack(fill='x', padx=14, pady=10)
 
     def _apply_profile(self, name, cmds):
+        if self._applying: return
+        self._applying = True
+        for b in self._p_btns: b.configure(state='disabled')
+
         for w in self.res_box.winfo_children(): w.destroy()
         ResultBox(self.res_box, 'ac', 'APPLYING PROFILE...', f'Executing hardening rules for {name}...').pack(fill='x')
         
@@ -84,6 +96,8 @@ class HardeningScreen(ctk.CTkFrame):
                 if rc != 0: success = False
             
             def _done():
+                self._applying = False
+                for b in self._p_btns: b.configure(state='normal')
                 for w in self.res_box.winfo_children(): w.destroy()
                 if success:
                     ResultBox(self.res_box, 'ok', f'{name.upper()} APPLIED', 'System has been hardened successfully.').pack(fill='x')

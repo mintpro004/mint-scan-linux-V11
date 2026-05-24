@@ -298,6 +298,17 @@ def install_rkhunter(parent, on_done=None):
         on_done=on_done)
 
 
+def install_ripgrep(parent, on_done=None):
+    InstallerPopup(parent, title="Install ripgrep",
+        commands=[
+            "sudo apt-get update -qq",
+            "sudo apt-get install -y ripgrep",
+            "rg --version",
+        ],
+        success_msg="ripgrep installed! Fast searching is now available.",
+        on_done=on_done)
+
+
 def install_all_tools(parent, on_done=None):
     InstallerPopup(parent, title="Install All Security Tools",
         commands=[

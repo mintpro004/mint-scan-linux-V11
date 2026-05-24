@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — Shared Widgets
+Mint Scan v11.1 — Shared Widgets
 3D-depth visual system: raised surfaces, bevel highlights, glow accents.
 DejaVu Sans Mono fonts throughout.
 
@@ -9,13 +9,6 @@ Compatibility:
 - Linux x86_64 and aarch64 (Ubuntu 20.04+, 22.04+)
 - Chromebook Crostini, Kali, WSL2, Raspberry Pi OS 64-bit
 - Wayland and X11
-
-Widget architecture note:
-  Card MUST be a proper CTkFrame subclass so that tkinter's widget tree
-  protocol (master._w string concatenation) works correctly. The previous
-  crash ("property '_w' has no setter") was caused by calling super().pack()
-  inside Card.__init__ before tkinter finished initialising the widget.
-  Fix: never call super().pack() in __init__. The caller always calls .pack().
 """
 import tkinter as tk
 import customtkinter as ctk
@@ -43,6 +36,47 @@ LIGHT_THEME = {
     'tx':  '#0d1f2d',  'mu':  '#3a5a70',  'mu2': '#2d4a60',
 }
 
+NORD_THEME = {
+    'bg':  '#2e3440', 'sf':  '#3b4252', 's2':  '#434c5e',
+    'brt': '#4c566a', 'brd': '#242933',
+    'br':  '#4c566a', 'br2': '#88c0d0',
+    'ac':  '#88c0d0', 'acg': '#3b4252',
+    'wn':  '#bf616a', 'am':  '#ebcb8b', 'ok':  '#a3be8c',
+    'bl':  '#81a1c1', 'pu':  '#b48ead',
+    'wng': '#3b4252', 'amg': '#3b4252', 'okg': '#3b4252',
+    'tx':  '#eceff4', 'mu':  '#d8dee9', 'mu2': '#e5e9f0',
+}
+
+DRACULA_THEME = {
+    'bg':  '#282a36', 'sf':  '#44475a', 's2':  '#6272a4',
+    'brt': '#bd93f9', 'brd': '#191a21',
+    'br':  '#44475a', 'br2': '#bd93f9',
+    'ac':  '#bd93f9', 'acg': '#282a36',
+    'wn':  '#ff5555', 'am':  '#ffb86c', 'ok':  '#50fa7b',
+    'bl':  '#8be9fd', 'pu':  '#ff79c6',
+    'wng': '#282a36', 'amg': '#282a36', 'okg': '#282a36',
+    'tx':  '#f8f8f2', 'mu':  '#6272a4', 'mu2': '#f8f8f2',
+}
+
+CYBERPUNK_THEME = {
+    'bg':  '#000b1e', 'sf':  '#00162d', 's2':  '#002142',
+    'brt': '#ff00ff', 'brd': '#00050f',
+    'br':  '#003d7a', 'br2': '#ff00ff',
+    'ac':  '#00ff00', 'acg': '#00162d',
+    'wn':  '#ff0055', 'am':  '#ffff00', 'ok':  '#00ffaa',
+    'bl':  '#00ffff', 'pu':  '#ff00ff',
+    'wng': '#000b1e', 'amg': '#000b1e', 'okg': '#000b1e',
+    'tx':  '#00ff00', 'mu':  '#008800', 'mu2': '#00ff00',
+}
+
+THEMES = {
+    'dark': DARK_THEME,
+    'light': LIGHT_THEME,
+    'nord': NORD_THEME,
+    'dracula': DRACULA_THEME,
+    'cyberpunk': CYBERPUNK_THEME,
+}
+
 C = dict(DARK_THEME)
 
 FONT    = 'DejaVu Sans Mono'
@@ -60,14 +94,18 @@ def get_theme():
 def apply_theme(name, accent=None, font_size=11):
     global _current_theme, MONO, MONO_SM, MONO_LG, MONO_XL
     _current_theme = name
-    C.update(LIGHT_THEME if name == 'light' else DARK_THEME)
+    C.update(THEMES.get(name, DARK_THEME))
     if accent:
         C['ac'] = accent
     fs      = max(9, font_size)
     MONO    = (FONT, fs)
     MONO_SM = (FONT, max(8, fs - 1))
     MONO_LG = (FONT, fs + 3, 'bold')
-    MONO_XL = (FONT, fs + 26, 'bold')
+    MONO_XL = (FONT, fs + 27, 'bold')
+
+    # Set CTk global appearance
+    ctk.set_appearance_mode('light' if name == 'light' else 'dark')
+
     try:
         ctk.set_appearance_mode('light' if name == 'light' else 'dark')
     except Exception:
@@ -79,10 +117,11 @@ def load_theme_settings():
     path = os.path.expanduser('~/.mint_scan_settings.json')
     try:
         if os.path.exists(path):
-            s = json.load(open(path))
-            apply_theme(s.get('theme', 'dark'),
-                        s.get('accent_color'), s.get('font_size', 11))
-            return s.get('ui_scale', 1.0)
+            with open(path) as f:
+                s = json.load(f)
+                apply_theme(s.get('theme', 'dark'),
+                            s.get('accent_color'), s.get('font_size', 11))
+                return s.get('ui_scale', 1.0)
     except Exception:
         pass
     apply_theme('dark')
@@ -128,18 +167,11 @@ class ScrollableFrame(ctk.CTkScrollableFrame):
 
 # ── Card ──────────────────────────────────────────────────────────
 class Card(ctk.CTkFrame):
-    """
-    Raised card with 3D bevel highlight border.
-    Simplified implementation for maximum compatibility with all screens.
-    """
     def __init__(self, parent, accent=None, **kwargs):
         fg = kwargs.pop('fg_color', C['sf'])
         cr = kwargs.pop('corner_radius', 10)
-        # Drop unsupported kwargs
         kwargs.pop('border_color', None)
         kwargs.pop('border_width', None)
-
-        # Use border to simulate the bevel
         super().__init__(parent, fg_color=fg, corner_radius=cr,
                          border_width=1, border_color=accent or C['brt'], **kwargs)
 
@@ -164,10 +196,6 @@ class SectionHeader(ctk.CTkFrame):
 
 # ── InfoGrid ──────────────────────────────────────────────────────
 class InfoGrid(ctk.CTkFrame):
-    """
-    Responsive stat grid. Each item is (label, value, colour) OR (label, value).
-    columns=3 default.
-    """
     def __init__(self, parent, items, columns=3, **kwargs):
         fg = kwargs.pop('fg_color', 'transparent')
         super().__init__(parent, fg_color=fg, **kwargs)
@@ -194,15 +222,12 @@ class InfoGrid(ctk.CTkFrame):
 
 # ── ResultBox ─────────────────────────────────────────────────────
 class ResultBox(ctk.CTkFrame):
-    """
-    Styled result box for scan findings.
-    Supports (rtype, title, msg) API for compatibility with all screens.
-    """
-    def __init__(self, parent, rtype='ok', title='', msg='', height=None, **kwargs):
+    def __init__(self, parent, rtype='ok', title='', msg='', body='', height=None, **kwargs):
+        # Handle 'body' as alias for 'msg'
+        msg = msg or body
         fg = kwargs.pop('fg_color', C['sf'])
         super().__init__(parent, fg_color='transparent', **kwargs)
         
-        # Color based on rtype
         if rtype == 'ok':
             col = C['ok']
         elif rtype in ('med', 'warn', 'warning'):
@@ -218,13 +243,11 @@ class ResultBox(ctk.CTkFrame):
         inner = ctk.CTkFrame(self._card, fg_color='transparent')
         inner.pack(fill='both', expand=True, padx=12, pady=10)
         
-        # Title row with icon
         icon = '✓' if rtype == 'ok' else '⚠'
         self.title_lbl = ctk.CTkLabel(inner, text=f"{icon} {title}", 
                                       font=(FONT, 11, 'bold'), text_color=col)
         self.title_lbl.pack(anchor='w')
         
-        # Message / Details
         if msg:
             self._box = ctk.CTkTextbox(inner, height=height or 60, font=(FONT, 10),
                                         fg_color='transparent', text_color=C['tx'],
@@ -242,8 +265,7 @@ class ResultBox(ctk.CTkFrame):
                 self._box.delete('1.0', 'end')
                 self._box.insert('end', str(text))
                 self._box.configure(state='disabled')
-        except Exception:
-            pass
+        except Exception: pass
 
     def append(self, text):
         try:
@@ -252,8 +274,7 @@ class ResultBox(ctk.CTkFrame):
                 self._box.insert('end', str(text) + '\n')
                 self._box.see('end')
                 self._box.configure(state='disabled')
-        except Exception:
-            pass
+        except Exception: pass
 
     def clear(self):
         try:
@@ -261,8 +282,7 @@ class ResultBox(ctk.CTkFrame):
                 self._box.configure(state='normal')
                 self._box.delete('1.0', 'end')
                 self._box.configure(state='disabled')
-        except Exception:
-            pass
+        except Exception: pass
 
     def configure(self, **kwargs):
         if 'rtype' in kwargs:
@@ -278,15 +298,14 @@ class ResultBox(ctk.CTkFrame):
             title = kwargs.pop('title')
             icon = '✓' if self.title_lbl.cget('text').startswith('✓') else '⚠'
             self.title_lbl.configure(text=f"{icon} {title}")
-        if 'msg' in kwargs:
-            msg = kwargs.pop('msg')
+        if 'msg' in kwargs or 'body' in kwargs:
+            msg = kwargs.pop('msg', kwargs.pop('body', ''))
             self.set(msg)
         return super().configure(**kwargs)
 
 
 # ── LiveBadge ─────────────────────────────────────────────────────
 class LiveBadge(ctk.CTkFrame):
-    """Pulsing 'LIVE' status indicator."""
     def __init__(self, parent, **kwargs):
         super().__init__(parent, fg_color='transparent', **kwargs)
         self._on = True
@@ -306,11 +325,31 @@ class LiveBadge(ctk.CTkFrame):
         self.after(800, self._pulse)
 
 
+# ── Badge ──────────────────────────────────────────────────────────
+class Badge(ctk.CTkFrame):
+    def __init__(self, parent, text, color=None, **kwargs):
+        color = color or C['ac']
+        super().__init__(parent, fg_color='transparent', **kwargs)
+        self.label = ctk.CTkLabel(self, text=text, font=(FONT, 8, 'bold'), 
+                                  text_color=color, fg_color='transparent',
+                                  padx=6, pady=2)
+        self.label.pack()
+        self.configure(border_color=color, border_width=1, corner_radius=10)
+
+
+# ── PortBar ───────────────────────────────────────────────────────
+class PortBar(ctk.CTkFrame):
+    def __init__(self, parent, port, proto, state, process, **kwargs):
+        super().__init__(parent, fg_color=C['sf'], border_color=C['br'], border_width=1, corner_radius=6, **kwargs)
+        col = C['ok'] if state.lower() == 'listen' else C['am']
+        ctk.CTkLabel(self, text=f":{port}", font=(FONT, 11, 'bold'), text_color=C['ac'], width=60).pack(side='left', padx=10, pady=6)
+        ctk.CTkLabel(self, text=proto.upper(), font=(FONT, 8), text_color=C['mu'], width=40).pack(side='left', padx=4)
+        ctk.CTkLabel(self, text=state.upper(), font=(FONT, 9, 'bold'), text_color=col, width=80).pack(side='left', padx=4)
+        ctk.CTkLabel(self, text=process, font=(FONT, 9), text_color=C['tx']).pack(side='left', padx=10, fill='x', expand=True)
+
+
 # ── Btn ───────────────────────────────────────────────────────────
 class Btn(ctk.CTkButton):
-    """
-    Styled button with variant support.
-    """
     VARIANTS = {
         'default': lambda: dict(fg_color=C['ac'],   text_color='#030f1c',
                                 hover_color=C['mu2'], border_width=0),
@@ -334,12 +373,21 @@ class Btn(ctk.CTkButton):
                  height=34, corner_radius=6, **kwargs):
         self._variant = variant
         style = self.VARIANTS.get(variant, self.VARIANTS['default'])()
-        style.update(kwargs)
-        super().__init__(
-            parent, text=text, height=height,
-            font=(FONT, 10, 'bold'),
-            corner_radius=corner_radius,
-            **style)
+        
+        # Extract font from kwargs or use default
+        font = kwargs.pop('font', (FONT, 10, 'bold'))
+        
+        # Build combined configuration
+        config = {
+            'text': text,
+            'height': height,
+            'font': font,
+            'corner_radius': corner_radius
+        }
+        config.update(style)
+        config.update(kwargs)
+        
+        super().__init__(parent, **config)
 
     def configure(self, **kwargs):
         if 'variant' in kwargs:

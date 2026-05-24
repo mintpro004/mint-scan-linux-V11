@@ -442,6 +442,8 @@ class ThreatsScreen(ctk.CTkFrame):
         def _do(pt=port):
             out, err, rc = _r(f"sudo ufw deny {pt} 2>/dev/null")
             self._alog(f"{'✓ Blocked :'+pt if rc==0 else '✗ '+( err or out)[:60]}")
+            # Refresh UI
+            self.after(1000, self._scan)
         self._bg(_do)
 
     def _local_only(self, port):
@@ -449,6 +451,7 @@ class ThreatsScreen(ctk.CTkFrame):
             _r(f"sudo ufw deny {pt}")
             _r(f"sudo ufw allow from 127.0.0.1 to any port {pt}")
             self._alog(f"✓ :{pt} restricted to localhost only")
+            self.after(1000, self._scan)
         self._bg(_do)
 
     def _kill_proc(self, name):
@@ -456,6 +459,7 @@ class ThreatsScreen(ctk.CTkFrame):
         def _do(n=name):
             out, err, rc = _r(f"sudo pkill -f '{n}' 2>/dev/null")
             self._alog(f"{'✓ Killed '+n if rc==0 else '✗ '+( err or out)[:60]}")
+            self.after(1000, self._scan)
         self._bg(_do)
 
     def _fix_ssh_root(self):

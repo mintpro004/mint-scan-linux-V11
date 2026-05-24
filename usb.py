@@ -245,6 +245,13 @@ class UsbScreen(ctk.CTkFrame):
             fill='x', padx=14, pady=(10,4))
         sync = Card(body)
         sync.pack(fill='x', padx=14, pady=(0,8))
+        
+        # PDF Option
+        self._export_pdf = tk.BooleanVar(value=False)
+        ctk.CTkCheckBox(sync, text="GENERATE PDF REPORT", variable=self._export_pdf,
+                        font=MONO_SM, text_color=C['mu'],
+                        fg_color=C['ac'], border_color=C['br']).pack(anchor='w', padx=12, pady=(10,0))
+
         sg = ctk.CTkFrame(sync, fg_color='transparent')
         sg.pack(fill='x', padx=8, pady=8)
         sync_actions = [
@@ -614,6 +621,38 @@ class UsbScreen(ctk.CTkFrame):
             return False
         return True
 
+    def _create_pdf(self, title, data, filename):
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas
+            
+            path = os.path.expanduser(f'~/{filename}.pdf')
+            c = canvas.Canvas(path, pagesize=letter)
+            c.setFont("Helvetica-Bold", 16)
+            c.drawString(100, 750, title)
+            c.setFont("Helvetica", 10)
+            c.drawString(100, 735, f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+            c.drawString(100, 720, f"Device: {self._device or 'Unknown'}")
+            
+            y = 680
+            for line in data.splitlines():
+                if y < 50:
+                    c.showPage()
+                    c.setFont("Helvetica", 10)
+                    y = 750
+                c.drawString(100, y, line[:100])
+                y -= 15
+            
+            c.save()
+            self._log(f"✓ PDF Created: {path}")
+            return True
+        except ImportError:
+            self._log("⚠ reportlab not installed — cannot generate PDF.")
+            return False
+        except Exception as e:
+            self._log(f"✗ PDF Error: {e}")
+            return False
+
     def _pull_calls(self):
         if not self._need_device(): return
         def _do():
@@ -624,9 +663,12 @@ class UsbScreen(ctk.CTkFrame):
                 "--projection number:date:duration:type:name 2>/dev/null | head -60",
                 timeout=15)
             if rc == 0 and out:
-                save = os.path.expanduser('~/mint-scan-calls.txt')
-                open(save,'w').write(out)
-                self._log(f"✓ {len(out.splitlines())} call records → {save}")
+                if self._export_pdf.get():
+                    self._create_pdf("CALL LOG REPORT", out, "mint-scan-calls")
+                else:
+                    save = os.path.expanduser('~/mint-scan-calls.txt')
+                    open(save,'w').write(out)
+                    self._log(f"✓ {len(out.splitlines())} call records → {save}")
             else:
                 self._log(f"Could not read call log: {err[:80]}")
         threading.Thread(target=_do, daemon=True).start()
@@ -641,9 +683,12 @@ class UsbScreen(ctk.CTkFrame):
                 "--projection address:date:body 2>/dev/null | head -40",
                 timeout=15)
             if rc == 0 and out:
-                save = os.path.expanduser('~/mint-scan-sms.txt')
-                open(save,'w').write(out)
-                self._log(f"✓ Pulled SMS → {save}")
+                if self._export_pdf.get():
+                    self._create_pdf("SMS MESSAGES REPORT", out, "mint-scan-sms")
+                else:
+                    save = os.path.expanduser('~/mint-scan-sms.txt')
+                    open(save,'w').write(out)
+                    self._log(f"✓ Pulled SMS → {save}")
             else:
                 self._log(f"Could not read SMS: {err[:80]}")
         threading.Thread(target=_do, daemon=True).start()
@@ -658,9 +703,12 @@ class UsbScreen(ctk.CTkFrame):
                 "--projection display_name:number 2>/dev/null | head -60",
                 timeout=15)
             if rc == 0 and out:
-                save = os.path.expanduser('~/mint-scan-contacts.txt')
-                open(save,'w').write(out)
-                self._log(f"✓ Pulled contacts → {save}")
+                if self._export_pdf.get():
+                    self._create_pdf("CONTACTS REPORT", out, "mint-scan-contacts")
+                else:
+                    save = os.path.expanduser('~/mint-scan-contacts.txt')
+                    open(save,'w').write(out)
+                    self._log(f"✓ Pulled contacts → {save}")
             else:
                 self._log(f"Could not read contacts: {err[:80]}")
         threading.Thread(target=_do, daemon=True).start()

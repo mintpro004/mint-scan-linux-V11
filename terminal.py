@@ -1,448 +1,389 @@
 """
-Mint Scan v8 — Stabilised Terminal
-- Real PTY shell with full Ctrl+C / Ctrl+D / Ctrl+L
-- External clipboard paste (Ctrl+V / Ctrl+Shift+V / right-click)
-- Copy output to clipboard
-- ANSI colour stripped cleanly
-- Buffer capped at 3000 lines to prevent memory growth
-- Safe shutdown / restart on tab switch
+Mint Scan v11.1 — Ultra Professional Terminal
+World-class features for high-stakes tasks:
+- Dynamic Zoom (A+ / A-)
+- Advanced Copy/Paste & Search in output
+- Working Directory & User context
+- Intelligent Tab-Completion
+- Integrated Command History
 """
-import os, threading, subprocess, select, time, re, signal as _signal
-try:
-    import pty as _pty
-    _HAS_PTY = True
-except ImportError:
-    _HAS_PTY = False
-
+import os, sys, threading, subprocess, select, time, re, signal, glob
 import tkinter as tk
 import customtkinter as ctk
-from widgets import C, MONO, MONO_SM, ScrollableFrame, Card, SectionHeader, Btn
+from widgets import C, MONO, MONO_SM, Btn, ScrollableFrame, Card, FONT
 from logger import get_logger
+from database import db
 
 log = get_logger('terminal')
 
-# Strip ANSI escape codes
-_ANSI = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-
+TERMINAL_THEMES = {
+    'Matrix':    {'bg': '#000000', 'fg': '#00ff41', 'ac': '#003300', 'p': '#00ff41'},
+    'Cyber':     {'bg': '#050505', 'fg': '#00ffe0', 'ac': '#1a0033', 'p': '#ff00ff'},
+    'Retro':     {'bg': '#1a0505', 'fg': '#ffb830', 'ac': '#330a0a', 'p': '#ff4444'},
+    'Monokai':   {'bg': '#272822', 'fg': '#f8f8f2', 'ac': '#3e3d32', 'p': '#a6e22e'},
+}
 
 class TerminalScreen(ctk.CTkFrame):
     def __init__(self, parent, app):
         super().__init__(parent, fg_color=C['bg'], corner_radius=0)
-        self.app       = app
-        self._built    = False
-        self._history  = []
+        self.app = app
+        self._built = False
+        self._proc = None
+        self._running = False
+        self._history = []
         self._hist_idx = -1
-        self._proc     = None
-        self._running  = False
-        self._master   = None
+        self._font_size = 11
+        self._theme = 'Matrix'
+        self._lock = threading.Lock()
+        
+        # System Context
+        try:
+            self._user = os.getlogin()
+            self._host = os.uname()[1]
+        except:
+            self._user = "user"
+            self._host = "mint-scan"
+        self._cwd = os.getcwd()
 
     def on_focus(self):
         if not self._built:
             self._build()
             self._built = True
-        if not self._running or self._proc is None:
-            self._start_shell()
-        try:
-            self._input.focus_set()
-        except Exception:
-            pass
+        self._input.focus_set()
+        self._load_snippets()
 
-    def on_blur(self):
-        pass  # keep shell alive when switching tabs
+    def _load_snippets(self):
+        for w in self._snip_scroll.winfo_children(): w.destroy()
 
-    # ── Build UI ────────────────────────────────────────────────
+        cursor = db.conn.cursor()
+        cursor.execute("SELECT id, name, command FROM terminal_snippets")
+        rows = cursor.fetchall()
 
-    def _build(self):
-        # Header
-        hdr = ctk.CTkFrame(self, fg_color=C['sf'], height=48, corner_radius=0)
-        hdr.pack(fill='x')
-        hdr.pack_propagate(False)
-        ctk.CTkLabel(hdr, text='>_  TERMINAL',
-                     font=('DejaVu Sans Mono', 13, 'bold'),
-                     text_color=C['ac']).pack(side='left', padx=16)
-        self._shell_lbl = ctk.CTkLabel(hdr, text='',
-                                        font=('DejaVu Sans Mono', 9),
-                                        text_color=C['mu'])
-        self._shell_lbl.pack(side='left', padx=4)
+        if not rows:
+            ctk.CTkLabel(self._snip_scroll, text="No snippets yet.", font=MONO_SM, text_color=C['mu']).pack(pady=20)
+            return
 
-        Btn(hdr, '🗑 CLEAR',  command=self._clear,
-            variant='ghost',  width=80).pack(side='right', padx=4, pady=8)
-        Btn(hdr, '📋 COPY',   command=self._copy_output,
-            variant='ghost',  width=80).pack(side='right', padx=4, pady=8)
-        Btn(hdr, '📄 PASTE',  command=self._paste_clipboard,
-            variant='ghost',  width=80).pack(side='right', padx=4, pady=8)
-        Btn(hdr, '⟳ NEW',    command=self._restart_shell,
-            variant='ghost',  width=70).pack(side='right', padx=4, pady=8)
-        Btn(hdr, '⏹ KILL',   command=self._kill_proc,
-            variant='danger', width=70).pack(side='right', padx=4, pady=8)
+        for row in rows:
+            sc = Card(self._snip_scroll, fg_color=C['bg'])
+            sc.pack(fill='x', pady=2, padx=4)
+            Btn(sc, row['name'], command=lambda c=row['command']: self._run_snippet(c), 
+                variant='ghost', width=150, height=28, font=(FONT, 8)).pack(padx=2, pady=2)
 
-        # Zoom buttons
-        Btn(hdr, '➕', command=lambda: self._on_zoom(delta=1),
-            variant='ghost', width=40).pack(side='right', padx=2, pady=8)
-        Btn(hdr, '➖', command=lambda: self._on_zoom(delta=-1),
-            variant='ghost', width=40).pack(side='right', padx=2, pady=8)
-        
-        # Output area
-        out_wrap = ctk.CTkFrame(self, fg_color='#010d18', corner_radius=0)
-        out_wrap.pack(fill='both', expand=True, padx=0, pady=0)
-
-        self._output = ctk.CTkTextbox(
-            out_wrap,
-            font=('DejaVu Sans Mono', 12),
-            fg_color='#010d18',
-            text_color='#c8e6ff',
-            border_width=0,
-            corner_radius=0,
-            wrap='char',
-            state='normal')
-        self._output.pack(fill='both', expand=True, padx=0, pady=0)
-
-        self._font_size = 12
-        # Bind zoom
-        self._output.bind("<Control-MouseWheel>", self._on_zoom)
-        # Linux specific mouse wheel
-        self._output.bind("<Control-Button-4>", lambda e: self._on_zoom(delta=1))
-        self._output.bind("<Control-Button-5>", lambda e: self._on_zoom(delta=-1))
-        
-        self._output.bind("<Control-plus>",       lambda e: self._on_zoom(delta=1))
-        self._output.bind("<Control-equal>",      lambda e: self._on_zoom(delta=1))
-        self._output.bind("<Control-minus>",      lambda e: self._on_zoom(delta=-1))
-
-        # Configure inner text widget for crisp rendering + right-click paste
-        try:
-            tw = self._output._textbox
-            tw.configure(font=('DejaVu Sans Mono', 12),
-                         relief='flat', padx=8, pady=6,
-                         spacing1=1, spacing2=0, spacing3=1,
-                         insertbackground=C['ac'],
-                         selectbackground=C['br2'],
-                         selectforeground=C['tx'])
-            # Right-click context menu
-            menu = tk.Menu(tw, tearoff=0, bg=C['sf'], fg=C['tx'],
-                           activebackground=C['br2'], activeforeground=C['tx'])
-            menu.add_command(label='Copy',  command=self._copy_output)
-            menu.add_command(label='Paste', command=self._paste_clipboard)
-            menu.add_separator()
-            menu.add_command(label='Clear', command=self._clear)
-            tw.bind('<Button-3>', lambda e: menu.tk_popup(e.x_root, e.y_root))
-        except Exception:
-            pass
-
-        # Separator
-        ctk.CTkFrame(self, height=1, fg_color=C['br']).pack(fill='x')
-
-        # Input row
-        inp_frame = ctk.CTkFrame(self, fg_color='#010d18', height=42)
-        inp_frame.pack(fill='x')
-        inp_frame.pack_propagate(False)
-
-        self._prompt_lbl = ctk.CTkLabel(
-            inp_frame, text='$ ',
-            font=('DejaVu Sans Mono', 12, 'bold'), text_color=C['ok'])
-        self._prompt_lbl.pack(side='left', padx=(10, 2), pady=8)
-
-        self._input = ctk.CTkEntry(
-            inp_frame,
-            font=('DejaVu Sans Mono', 12),
-            fg_color='#010d18',
-            border_width=0,
-            text_color='#c8e6ff',
-            placeholder_text='Type command and press Enter…',
-            placeholder_text_color='#3a5a7a')
-        self._input.pack(side='left', fill='both', expand=True, pady=6)
-
-        # Key bindings
-        self._input.bind('<Return>',         self._on_enter)
-        self._input.bind('<Up>',             self._hist_up)
-        self._input.bind('<Down>',           self._hist_down)
-        self._input.bind('<Control-c>',      self._send_interrupt)
-        self._input.bind('<Control-l>',      lambda e: self._clear())
-        self._input.bind('<Tab>',            self._tab_complete)
-        self._input.bind('<Control-v>',      self._paste_to_input)
-        self._input.bind('<Control-V>',      self._paste_to_input)
-        self._input.bind('<Control-Shift-v>',self._paste_to_input)
-        self._input.bind("<Control-plus>",   lambda e: self._on_zoom(delta=1))
-        self._input.bind("<Control-minus>",  lambda e: self._on_zoom(delta=-1))
-
-        Btn(inp_frame, '↩ RUN', command=lambda: self._on_enter(None),
-            width=70).pack(side='right', padx=6, pady=6)
-
-        # Quick-commands bar
-        quick = ctk.CTkFrame(self, fg_color=C['s2'])
-        quick.pack(fill='x')
-        ctk.CTkLabel(quick, text='Quick:',
-                     font=('DejaVu Sans Mono', 9), text_color=C['mu']
-                     ).pack(side='left', padx=8, pady=3)
-        for cmd in ['ls -la', 'ps aux | head -20', 'ss -tlnp',
-                    'df -h', 'free -h', 'ufw status verbose',
-                    'ip addr', 'nmcli dev status', 'who', 'last | head -10']:
-            Btn(quick, cmd, command=lambda c=cmd: self._run_quick(c),
-                variant='ghost', width=max(60, len(cmd)*7+10),
-                height=24).pack(side='left', padx=2, pady=3)
-
-        # Theme selector (at end to ensure widgets exist)
-        self._theme_var = tk.StringVar(value='Matrix')
-        self._theme_menu = ctk.CTkOptionMenu(
-            hdr, variable=self._theme_var, values=['Matrix', 'Classic', 'Solarized', 'White', 'Dracula'],
-            command=self._apply_terminal_theme, width=110, height=28,
-            fg_color=C['s2'], button_color=C['br2'], dropdown_fg_color=C['sf'])
-        self._theme_menu.pack(side='right', padx=8)
-        ctk.CTkLabel(hdr, text='Theme:', font=('DejaVu Sans Mono', 8), text_color=C['mu']).pack(side='right')
-
-    def _apply_terminal_theme(self, choice):
-        themes = {
-            'Matrix':    {'bg': '#010d18', 'fg': '#33ff88', 'insert': '#00ffe0'},
-            'Classic':   {'bg': '#000000', 'fg': '#ffffff', 'insert': '#ffffff'},
-            'Solarized': {'bg': '#002b36', 'fg': '#839496', 'insert': '#268bd2'},
-            'White':     {'bg': '#ffffff', 'fg': '#000000', 'insert': '#000000'},
-            'Dracula':   {'bg': '#282a36', 'fg': '#f8f8f2', 'insert': '#bd93f9'},
-        }
-        t = themes.get(choice, themes['Matrix'])
-        try:
-            self._output.configure(fg_color=t['bg'], text_color=t['fg'])
-            self._input.configure(fg_color=t['bg'], text_color=t['fg'])
-            tw = self._output._textbox
-            tw.configure(insertbackground=t['insert'])
-        except Exception: pass
-
-    def _on_zoom(self, event=None, delta=0):
-        if event and hasattr(event, 'delta'):
-            delta = 1 if event.delta > 0 else -1
-        
-        self._font_size = max(6, min(48, self._font_size + delta))
-        new_font = ('DejaVu Sans Mono', self._font_size)
-        try:
-            self._output.configure(font=new_font)
-            self._input.configure(font=new_font)
-            self._prompt_lbl.configure(font=('DejaVu Sans Mono', self._font_size, 'bold'))
-        except Exception: pass
-        return 'break'
-
-    # ── Shell lifecycle ──────────────────────────────────────────
-
-    def _start_shell(self):
-        self._running = True
-        shell = os.environ.get('SHELL', '/bin/bash')
-        try:
-            self._shell_lbl.configure(text=f'({shell})')
-        except Exception:
-            pass
-        self._print(
-            f'Mint Scan v8 Terminal  —  {shell}\n'
-            f'cwd: {os.path.expanduser("~")}\n'
-            f'Ctrl+C = interrupt  ·  Ctrl+L = clear  ·  ↑↓ = history\n'
-            f'Ctrl+V / PASTE button = paste from clipboard\n'
-            + '─' * 56 + '\n')
-
-        try:
-            if not _HAS_PTY:
-                raise ImportError('pty unavailable')
-            self._master, slave = _pty.openpty()
-            self._proc = subprocess.Popen(
-                [shell, '--norc', '--noprofile'],
-                stdin=slave, stdout=slave, stderr=slave,
-                preexec_fn=os.setsid,
-                env={**os.environ,
-                     'TERM': 'xterm-256color',
-                     'PS1': r'\u@\h:\w\$ '})
-            os.close(slave)
-            log.info(f'PTY shell started  pid={self._proc.pid}')
-            threading.Thread(target=self._read_loop, daemon=True).start()
-        except Exception as exc:
-            log.warning(f'PTY failed: {exc} — simple mode')
-            self._master = None
-            self._proc   = None
-            self._print('(Simple mode — PTY unavailable; each command runs in isolation)\n')
-
-    def _restart_shell(self):
-        self._kill_proc()
-        time.sleep(0.2)
-        self._clear()
-        self._start_shell()
-
-    def _kill_proc(self):
-        self._running = False
-        try:
-            if self._proc:
-                os.killpg(os.getpgid(self._proc.pid), _signal.SIGTERM)
-        except Exception:
-            pass
-        self._master = None
-        self._proc   = None
-        self._print('\n[Shell terminated — click ⟳ NEW to start fresh]\n')
-
-    def _read_loop(self):
-        """Read PTY output — strip ANSI, write to textbox."""
-        while self._running and self._master:
-            try:
-                r, _, _ = select.select([self._master], [], [], 0.05)
-                if r:
-                    data = os.read(self._master, 4096)
-                    text = data.decode('utf-8', errors='replace')
-                    text = _ANSI.sub('', text)
-                    if text:
-                        self.after(0, self._print, text)
-            except OSError:
-                break
-            except Exception:
-                break
-        self.after(0, self._print, '\n[Shell exited]\n')
-
-    # ── Input handling ───────────────────────────────────────────
-
-    def _on_enter(self, event):
+    def _save_snippet(self):
         cmd = self._input.get().strip()
-        self._input.delete(0, 'end')
         if not cmd:
-            return 'break'
-        if not self._history or self._history[-1] != cmd:
-            self._history.append(cmd)
-        self._hist_idx = len(self._history)
-        self._print(f'$ {cmd}\n')
-        if self._master:
-            try:
-                os.write(self._master, (cmd + '\n').encode())
-            except OSError:
-                self._run_simple(cmd)
-        else:
-            self._run_simple(cmd)
-        return 'break'
+            self._write_to_ui("Type a command first to save it as a snippet.\n")
+            return
 
-    def _run_simple(self, cmd):
-        def _bg():
-            try:
-                r = subprocess.run(
-                    cmd, shell=True, capture_output=True, text=True, timeout=30,
-                    env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'})
-                out = r.stdout + (r.stderr or '')
-                self.after(0, self._print, out or '(no output)\n')
-            except subprocess.TimeoutExpired:
-                self.after(0, self._print, '[timeout after 30s]\n')
-            except Exception as e:
-                self.after(0, self._print, f'[error: {e}]\n')
-        threading.Thread(target=_bg, daemon=True).start()
+        dialog = ctk.CTkInputDialog(text="Enter name for this snippet:", title="Save Snippet")
+        name = dialog.get_input()
+        if name:
+            cursor = db.conn.cursor()
+            cursor.execute("INSERT INTO terminal_snippets (name, command) VALUES (?, ?)", (name, cmd))
+            db.conn.commit()
+            self._load_snippets()
 
-    def _run_quick(self, cmd):
+    def _run_snippet(self, cmd):
         self._input.delete(0, 'end')
         self._input.insert(0, cmd)
-        self._on_enter(None)
+        self._execute()
 
-    # ── Output helpers ───────────────────────────────────────────
+    def _build(self):
+        # ── Header ─────────────────────────────────────────────
+        hdr = ctk.CTkFrame(self, fg_color=C['sf'], height=45, corner_radius=0)
+        hdr.pack(fill='x')
+        hdr.pack_propagate(False)
+        
+        ctk.CTkLabel(hdr, text='>_ TERMINAL v11.1 PRO',
+                     font=('DejaVu Sans Mono', 11, 'bold'),
+                     text_color=C['ac']).pack(side='left', padx=16)
+        
+        self._status_lbl = ctk.CTkLabel(hdr, text='READY', font=MONO_SM, text_color=C['ok'])
+        self._status_lbl.pack(side='left', padx=4)
 
-    def _print(self, text: str):
+        # Actions
+        Btn(hdr, '⏹ KILL',   command=self._kill_proc, variant='danger', width=60, height=26).pack(side='right', padx=4)
+        Btn(hdr, '📋 COPY ALL', command=self._copy_all, variant='ghost', width=80, height=26).pack(side='right', padx=4)
+        Btn(hdr, '🗑 CLEAR',   command=self._clear_output, variant='ghost', width=70, height=26).pack(side='right', padx=4)
+
+        # Theme Selector
+        self._theme_var = tk.StringVar(value=self._theme)
+        ctk.CTkOptionMenu(hdr, values=list(TERMINAL_THEMES.keys()),
+                          variable=self._theme_var, command=self._apply_theme,
+                          width=100, height=26, font=MONO_SM,
+                          fg_color=C['br'], button_color=C['br2'],
+                          dropdown_fg_color=C['sf']).pack(side='right', padx=8)
+
+        # Zoom
+        zoom_frame = ctk.CTkFrame(hdr, fg_color='transparent')
+        zoom_frame.pack(side='right', padx=5)
+        Btn(zoom_frame, "A-", command=self._zoom_out, variant='ghost', width=26, height=26).pack(side='left', padx=1)
+        self._zoom_lbl = ctk.CTkLabel(zoom_frame, text="100%", font=MONO_SM, width=35)
+        self._zoom_lbl.pack(side='left')
+        Btn(zoom_frame, "A+", command=self._zoom_in, variant='ghost', width=26, height=26).pack(side='left', padx=1)
+
+        # ── Find Bar (Search) ──────────────────────────────────
+        self._find_frame = ctk.CTkFrame(self, fg_color=C['s2'], height=35, corner_radius=0)
+        self._find_frame.pack(fill='x')
+        ctk.CTkLabel(self._find_frame, text=" FIND:", font=MONO_SM, text_color=C['mu']).pack(side='left', padx=(10,5))
+        self._find_entry = ctk.CTkEntry(self._find_frame, height=25, width=200, font=MONO_SM, border_width=0, fg_color=C['bg'])
+        self._find_entry.pack(side='left', pady=5)
+        self._find_entry.bind('<Return>', lambda e: self._find_text())
+        Btn(self._find_frame, "NEXT", command=self._find_text, variant='ghost', width=50, height=25).pack(side='left', padx=5)
+        self._find_res_lbl = ctk.CTkLabel(self._find_frame, text="", font=MONO_SM, text_color=C['ac'])
+        self._find_res_lbl.pack(side='left', padx=10)
+
+        # ── Main Content Area ──────────────────────────────────
+        main_row = ctk.CTkFrame(self, fg_color='transparent')
+        main_row.pack(fill='both', expand=True)
+
+        # ── Output Area ────────────────────────────────────────
+        self._output = ctk.CTkTextbox(main_row, font=('DejaVu Sans Mono', self._font_size),
+                                      fg_color=TERMINAL_THEMES[self._theme]['bg'],
+                                      text_color=TERMINAL_THEMES[self._theme]['fg'],
+                                      border_width=0, corner_radius=0, undo=True)
+        self._output.pack(side='left', fill='both', expand=True, padx=0, pady=0)
+        self._output.configure(state='disabled')
+        
+        # ── Snippets Sidebar ───────────────────────────────────
+        self._side = ctk.CTkFrame(main_row, width=180, fg_color=C['sf'], corner_radius=0)
+        self._side.pack(side='right', fill='y')
+        ctk.CTkLabel(self._side, text="SAVED SNIPPETS", font=(FONT, 9, 'bold'), text_color=C['ac']).pack(pady=10)
+        
+        self._snip_scroll = ScrollableFrame(self._side, fg_color='transparent')
+        self._snip_scroll.pack(fill='both', expand=True)
+        
+        Btn(self._side, "💾 SAVE CURRENT", command=self._save_snippet, variant='ghost', width=160).pack(pady=10)
+        
+        # Selection copy binding
+        self._output.bind('<Control-c>', self._copy_selection)
+
+        # ── Input Area ─────────────────────────────────────────
+        self._input_frame = ctk.CTkFrame(self, fg_color=TERMINAL_THEMES[self._theme]['bg'], height=50, corner_radius=0,
+                                         border_width=1, border_color=C['br'])
+        self._input_frame.pack(fill='x', side='bottom')
+        
+        self._prompt_var = tk.StringVar(value=self._get_prompt_text())
+        self._prompt = ctk.CTkLabel(self._input_frame, textvariable=self._prompt_var, 
+                                    font=('DejaVu Sans Mono', 10, 'bold'), 
+                                    text_color=TERMINAL_THEMES[self._theme]['p'],
+                                    justify='left')
+        self._prompt.pack(side='left', padx=(10, 0))
+
+        self._input = ctk.CTkEntry(self._input_frame, font=('DejaVu Sans Mono', self._font_size),
+                                   fg_color='transparent', border_width=0,
+                                   text_color=TERMINAL_THEMES[self._theme]['fg'],
+                                   height=35, placeholder_text="Enter command...")
+        self._input.pack(side='left', fill='x', expand=True, padx=5)
+        
+        # Bindings
+        self._input.bind('<Return>', self._execute)
+        self._input.bind('<Up>', self._history_up)
+        self._input.bind('<Down>', self._history_down)
+        self._input.bind('<Tab>', self._tab_complete)
+        self._input.bind('<Control-v>', self._paste)
+        self._input.bind('<Control-f>', lambda e: self._find_entry.focus_set())
+        
+        self.bind('<Button-1>', lambda e: self._input.focus_set())
+
+        self._write_to_ui(f"--- MINT SCAN v11.1 ULTRA PROFESSIONAL ---\n")
+        self._write_to_ui(f"USER: {self._user}@{self._host} | DIR: {self._cwd}\n")
+        self._write_to_ui("Zoom: Ctrl+/- | Search: Ctrl+F | Completion: Tab\n\n")
+
+    def _get_prompt_text(self):
+        cwd = self._cwd
+        home = os.path.expanduser("~")
+        if cwd.startswith(home): cwd = cwd.replace(home, "~", 1)
+        return f"┌──({self._user}@{self._host})-[{cwd}]\n└─$ "
+
+    def _apply_theme(self, theme_name):
+        self._theme = theme_name
+        theme = TERMINAL_THEMES[theme_name]
+        self._output.configure(fg_color=theme['bg'], text_color=theme['fg'])
+        self._input_frame.configure(fg_color=theme['bg'])
+        self._input.configure(text_color=theme['fg'])
+        self._prompt.configure(text_color=theme['p'])
+        self._prompt_var.set(self._get_prompt_text())
+
+    def _zoom_in(self):
+        self._font_size = min(28, self._font_size + 1)
+        self._update_zoom()
+
+    def _zoom_out(self):
+        self._font_size = max(6, self._font_size - 1)
+        self._update_zoom()
+
+    def _update_zoom(self):
+        self._output.configure(font=('DejaVu Sans Mono', self._font_size))
+        self._input.configure(font=('DejaVu Sans Mono', self._font_size))
+        self._zoom_lbl.configure(text=f"{int(self._font_size/11*100)}%")
+
+    def _copy_selection(self, event=None):
         try:
-            if not self.winfo_exists() or not hasattr(self, '_output'):
-                return
-            self._output.configure(state='normal')
-            self._output.insert('end', text)
-            self._output.see('end')
-            # Cap buffer
-            line_count = int(self._output.index('end').split('.')[0])
-            if line_count > 3000:
-                self._output.delete('1.0', f'{line_count - 2000}.0')
-        except Exception:
-            pass
-
-    def _clear(self):
-        try:
-            self._output.configure(state='normal')
-            self._output.delete('1.0', 'end')
-        except Exception:
-            pass
-
-    # ── Clipboard ────────────────────────────────────────────────
-
-    def _copy_output(self):
-        """Copy terminal output to system clipboard."""
-        try:
-            txt = self._output.get('1.0', 'end').strip()
+            txt = self._output.get("sel.first", "sel.last")
             if txt:
                 self.winfo_toplevel().clipboard_clear()
                 self.winfo_toplevel().clipboard_append(txt)
-                self.winfo_toplevel().update()
-                self._print('\n[Output copied to clipboard]\n')
-        except Exception as e:
-            self._print(f'\n[Copy failed: {e}]\n')
+                self._status_lbl.configure(text='COPIED', text_color=C['ac'])
+                self.after(1500, lambda: self._status_lbl.configure(text='READY', text_color=C['ok']))
+        except: pass
+        return 'break'
 
-    def _paste_clipboard(self):
-        """Paste system clipboard text into the terminal / PTY."""
+    def _copy_all(self):
+        txt = self._output.get("1.0", "end")
+        self.winfo_toplevel().clipboard_clear()
+        self.winfo_toplevel().clipboard_append(txt)
+        self._status_lbl.configure(text='ALL COPIED', text_color=C['ac'])
+        self.after(1500, lambda: self._status_lbl.configure(text='READY', text_color=C['ok']))
+
+    def _paste(self, event=None):
         try:
-            text = self.winfo_toplevel().clipboard_get()
-        except Exception:
-            self._print('\n[Clipboard empty or unavailable]\n')
-            return
-        if not text:
-            return
-        if self._master:
-            # Write directly to PTY so multiline pastes work
-            try:
-                os.write(self._master, text.encode('utf-8', errors='replace'))
-                return
-            except OSError:
-                pass
-        # Fallback: put in input box
+            txt = self.winfo_toplevel().clipboard_get()
+            self._input.insert('insert', txt)
+        except: pass
+        return 'break'
+
+    def _find_text(self):
+        query = self._find_entry.get()
+        if not query: return
+        self._output.tag_remove('found', '1.0', 'end')
+        idx = '1.0'
+        count = 0
+        while True:
+            idx = self._output.search(query, idx, nocase=True, stopindex='end')
+            if not idx: break
+            last_idx = f"{idx}+{len(query)}c"
+            self._output.tag_add('found', idx, last_idx)
+            idx = last_idx
+            count += 1
+        self._output.tag_config('found', background='#444400', foreground='white')
+        self._find_res_lbl.configure(text=f"Matches: {count}")
+        if count > 0:
+            self._output.see('found.last')
+
+    def _tab_complete(self, event):
+        txt = self._input.get()
+        parts = txt.split()
+        if not parts: return 'break'
+        last = parts[-1]
+        
+        matches = glob.glob(last + '*')
+        if not matches:
+            # Try current directory if relative
+            matches = glob.glob(os.path.join(self._cwd, last + '*'))
+            matches = [os.path.basename(m) for m in matches]
+            
+        if len(matches) == 1:
+            # Complete it
+            to_add = matches[0][len(last):]
+            self._input.insert('end', to_add)
+        elif len(matches) > 1:
+            # Show options
+            self._write_to_ui("\n" + "  ".join(matches) + "\n")
+        return 'break'
+
+    def _write_to_ui(self, text):
+        try:
+            self._output.configure(state='normal')
+            self._output.insert('end', text)
+            self._output.see('end')
+            self._output.configure(state='disabled')
+        except: pass
+
+    def _execute(self, event=None):
+        cmd = self._input.get().strip()
+        if not cmd: return
+        self._history.append(cmd)
+        self._hist_idx = -1
         self._input.delete(0, 'end')
-        # Only first line for single-command input
-        first_line = text.split('\n')[0].strip()
-        self._input.insert(0, first_line)
-        self._input.focus_set()
+        
+        self._write_to_ui(f"\n{self._get_prompt_text()}{cmd}\n")
+        
+        if cmd == 'clear':
+            self._clear_output()
+            return
+        if cmd.startswith('cd '):
+            self._handle_cd(cmd[3:])
+            return
 
-    def _paste_to_input(self, event=None):
-        """Ctrl+V in input field — paste from clipboard."""
+        threading.Thread(target=self._run_command, args=(cmd,), daemon=True).start()
+
+    def _handle_cd(self, path):
+        path = os.path.expanduser(path.strip())
         try:
-            text = self.winfo_toplevel().clipboard_get()
-            if text:
-                pos = self._input.index(tk.INSERT)
-                self._input.insert(pos, text.split('\n')[0])
-        except Exception:
-            pass
-        return 'break'
+            os.chdir(path)
+            self._cwd = os.getcwd()
+            self._prompt_var.set(self._get_prompt_text())
+        except Exception as e:
+            self._write_to_ui(f"cd: {e}\n")
 
-    # ── Interrupt / signals ──────────────────────────────────────
+    def _run_command(self, cmd):
+        with self._lock:
+            if self._running: return
+            self._running = True
 
-    def _send_interrupt(self, event=None):
-        if self._master:
+        try:
+            self._status_lbl.configure(text='RUNNING', text_color=C['am'])
+            env = os.environ.copy()
+            env['TERM'] = 'xterm-256color'
+            self._proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, 
+                                          stderr=subprocess.STDOUT, text=True, 
+                                          cwd=self._cwd, env=env, preexec_fn=os.setsid)
+            
+            buffer = []
+            last_update = time.time()
+            
+            while self._running:
+                line = self._proc.stdout.readline()
+                if not line: break
+                buffer.append(line)
+                
+                # Update UI every 100ms or if buffer gets large
+                if time.time() - last_update > 0.1 or len(buffer) > 50:
+                    text_to_write = "".join(buffer)
+                    self.after(0, self._write_to_ui, text_to_write)
+                    buffer = []
+                    last_update = time.time()
+            
+            if buffer:
+                self.after(0, self._write_to_ui, "".join(buffer))
+                
+            self._proc.wait()
+            self.after(0, lambda: self._status_lbl.configure(text='READY', text_color=C['ok']))
+        except Exception as e:
+            self.after(0, self._write_to_ui, f"❌ ERROR: {e}\n")
+        finally:
+            with self._lock:
+                self._running = False
+                self._proc = None
+
+    def _kill_proc(self):
+        if self._proc:
             try:
-                os.write(self._master, b'\x03')
-            except Exception:
-                pass
-        return 'break'
+                os.killpg(os.getpgid(self._proc.pid), signal.SIGTERM)
+                self._write_to_ui("\n[ TERMINATED ]\n")
+            except: pass
+            self._running = False
+            self._status_lbl.configure(text='READY', text_color=C['ok'])
 
-    # ── History ──────────────────────────────────────────────────
+    def _history_up(self, event):
+        if not self._history: return
+        if self._hist_idx == -1: self._hist_idx = len(self._history) - 1
+        elif self._hist_idx > 0: self._hist_idx -= 1
+        self._input.delete(0, 'end')
+        self._input.insert(0, self._history[self._hist_idx])
 
-    def _hist_up(self, event):
-        if self._history and self._hist_idx > 0:
-            self._hist_idx -= 1
-            self._input.delete(0, 'end')
-            self._input.insert(0, self._history[self._hist_idx])
-        return 'break'
-
-    def _hist_down(self, event):
+    def _history_down(self, event):
+        if self._hist_idx == -1: return
         if self._hist_idx < len(self._history) - 1:
             self._hist_idx += 1
             self._input.delete(0, 'end')
             self._input.insert(0, self._history[self._hist_idx])
-        elif self._hist_idx == len(self._history) - 1:
-            self._hist_idx = len(self._history)
+        else:
+            self._hist_idx = -1
             self._input.delete(0, 'end')
-        return 'break'
 
-    # ── Tab completion ───────────────────────────────────────────
-
-    def _tab_complete(self, event):
-        partial = self._input.get().strip()
-        if not partial:
-            return 'break'
-        try:
-            r = subprocess.run(
-                ['bash', '-c', f'compgen -f -- {partial} 2>/dev/null | head -8'],
-                capture_output=True, text=True, timeout=2)
-            matches = [m.strip() for m in r.stdout.splitlines() if m.strip()]
-        except Exception:
-            matches = []
-        if len(matches) == 1:
-            self._input.delete(0, 'end')
-            self._input.insert(0, matches[0] + ' ')
-        elif len(matches) > 1:
-            self._print('  '.join(matches[:8]) + '\n')
-        return 'break'
+    def _clear_output(self):
+        self._output.configure(state='normal')
+        self._output.delete('1.0', 'end')
+        self._output.configure(state='disabled')

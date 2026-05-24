@@ -1,10 +1,10 @@
 """
-Mint Scan v8 — CVE Vulnerability Database Lookup
+Mint Scan v11.1 — CVE Vulnerability Database Lookup
 Queries the NIST NVD API (free, no key) for CVE data on detected services.
 """
 import tkinter as tk
 import customtkinter as ctk
-import threading, json, time
+import threading, json, time, os
 import urllib.request, urllib.parse
 from widgets import (C, MONO, MONO_SM, ScrollableFrame, Card,
                      SectionHeader, Btn, ResultBox, InfoGrid)
@@ -216,6 +216,15 @@ class CVELookupScreen(ctk.CTkFrame):
         Btn(sr, '📦 OFFLINE DB', command=self._download_db,
             variant='ghost', width=120).pack(side='left')
         self._q.bind('<Return>', lambda e: self._search())
+
+    def search_external(self, query):
+        """Programmatically trigger a search from another screen."""
+        if not self._built:
+            self._build()
+            self._built = True
+        self._q.delete(0, 'end')
+        self._q.insert(0, query)
+        self._search()
 
         # Quick searches from open ports
         SectionHeader(body, '02', 'QUICK SCAN — LOCAL SERVICES').pack(

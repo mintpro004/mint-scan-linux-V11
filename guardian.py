@@ -1,15 +1,17 @@
 """
-Mint Scan v8 — Guardian Auto-Defense
+Mint Scan v11.1 — Guardian Auto-Defense
 Real monitoring: watches ports, processes, failed logins.
 Fires desktop notifications for critical events.
 """
 import customtkinter as ctk
-import threading, subprocess, time, os
+import tkinter as tk
+import threading, subprocess, time, os, json
 from widgets import (ScrollableFrame, Card, SectionHeader,
-                     InfoGrid, ResultBox, Btn, C, MONO, MONO_SM)
+                     InfoGrid, ResultBox, Btn, C, MONO, MONO_SM, FONT)
 from utils import run_cmd
 from logger import get_logger
 from notifier import critical, warning
+from database import db
 
 log = get_logger('guardian')
 
@@ -78,7 +80,20 @@ class GuardianScreen(ctk.CTkFrame):
 
         self.toggle_btn = Btn(mode_card, 'ENABLE GUARDIAN',
                               command=self._toggle_guardian, width=180)
-        self.toggle_btn.pack(pady=(0, 12))
+        self.toggle_btn.pack(pady=(0, 8))
+
+        # Auto-Lock Threshold
+        thr_frame = ctk.CTkFrame(mode_card, fg_color='transparent')
+        thr_frame.pack(pady=(0, 12))
+        ctk.CTkLabel(thr_frame, text='AUTO-LOCK SCORE THRESHOLD:',
+                     font=MONO_SM, text_color=C['mu']).pack(side='left', padx=8)
+        self._lock_threshold = tk.IntVar(value=40)
+        self._thr_lbl = ctk.CTkLabel(thr_frame, text='40', font=(FONT, 10, 'bold'), text_color=C['ac'], width=30)
+        self._thr_lbl.pack(side='right', padx=8)
+        self._thr_slider = ctk.CTkSlider(thr_frame, from_=0, to=90, number_of_steps=18,
+                                         variable=self._lock_threshold, width=160,
+                                         command=lambda v: self._thr_lbl.configure(text=str(int(v))))
+        self._thr_slider.pack(side='right')
 
         # Live stats
         self._stats_frame = ctk.CTkFrame(mode_card, fg_color='transparent')
@@ -93,6 +108,7 @@ class GuardianScreen(ctk.CTkFrame):
         for key, label, default in [
             ('ports',   'Dangerous open ports (4444, 5555, 23…)', True),
             ('ssh',     'SSH brute-force (5+ fails/5min)',         True),
+            ('ips',     'IPS: Auto-block attacking IPs',           True),
             ('fw',      'Firewall disabled alert',                 True),
             ('disk',    'Disk >90% full alert',                    True),
             ('process', 'Known malware process names',             True),
@@ -194,6 +210,13 @@ class GuardianScreen(ctk.CTkFrame):
                         'ddostool', 'mirai', 'tsunami'}
         while self._guardian_active:
             try:
+                # 0. Check Score for Auto-Lock
+                cur_score = getattr(self.app, '_last_score', 100)
+                threshold = self._lock_threshold.get()
+                if cur_score < threshold:
+                    self._glog_line(f"⚠ SECURITY SCORE CRITICAL ({cur_score} < {threshold})")
+                    self._auto_lock()
+
                 # Check dangerous ports
                 if self._rules.get('ports', ctk.BooleanVar()).get():
                     from utils import get_open_ports
@@ -209,16 +232,27 @@ class GuardianScreen(ctk.CTkFrame):
 
                 # Check SSH failures
                 if self._rules.get('ssh', ctk.BooleanVar()).get():
-                    out, _, _ = run_cmd(
-                        "journalctl -u ssh --since '5 minutes ago' 2>/dev/null"
-                        " | grep -c 'Failed password' || echo 0")
-                    try:
-                        n = int(out.strip())
-                        if n >= 5:
-                            self._fire_alert('ssh_brute', '🔐 SSH Attack Detected', 
-                                           f'{n} failed SSH attempts in 5 min!')
-                    except Exception:
-                        pass
+                    cmd = "journalctl -u ssh --since '5 minutes ago' 2>/dev/null | grep 'Failed password' | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+' | sort | uniq -c"
+                    out, _, _ = run_cmd(cmd)
+                    for line in out.strip().split('\n'):
+                        if not line.strip(): continue
+                        parts = line.strip().split()
+                        if len(parts) >= 2:
+                            try:
+                                n = int(parts[0])
+                                ip = parts[1]
+                                if n >= 5:
+                                    self._fire_alert(f'ssh_brute_{ip}', '🔐 SSH Attack Detected', 
+                                                   f'{n} failed SSH attempts from {ip}!')
+                                    
+                                    # IPS: Auto-block
+                                    if self._rules.get('ips', ctk.BooleanVar()).get():
+                                        self._glog_line(f"IPS: Blocking {ip} (brute-force)")
+                                        run_cmd(f"sudo ufw deny from {ip}")
+                                        db.log_event("Guardian IPS", "CRITICAL", "IP_BLOCKED", 
+                                                   f"Blocked IP {ip} due to {n} failed SSH attempts.")
+                            except Exception:
+                                pass
 
                 # Check firewall
                 if self._rules.get('fw', ctk.BooleanVar()).get():
@@ -251,12 +285,16 @@ class GuardianScreen(ctk.CTkFrame):
                                                    f'Suspicious process: {parts[10]}')
                                     break
 
-                self._glog_line('● Scan complete — all clear')
-
             except Exception as e:
                 log.warning(f'Guardian monitor error: {e}')
 
             time.sleep(60)
+
+    def _auto_lock(self):
+        log.warning('AUTO-LOCK TRIGGERED')
+        run_cmd('loginctl lock-session 2>/dev/null || xdg-screensaver lock 2>/dev/null || true', timeout=3)
+        self._glog_line('🔒 AUTO-LOCK EXECUTED — screen locked due to low security score')
+        warning('🔒 Auto-Lock', 'System locked due to low security score.')
 
     def _panic(self):
         log.warning('PANIC BUTTON ACTIVATED')

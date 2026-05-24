@@ -1,9 +1,9 @@
 """
-Mint Scan v8 — Plugin Marketplace
+Mint Scan v11.1 — Plugin Marketplace
 Browse, download, and install plugins from the official GitHub repo.
 Also manage local plugins.
 """
-import os, threading, json, time, shutil
+import os, threading, json, time, shutil, subprocess
 import urllib.request
 import tkinter as tk
 import customtkinter as ctk
@@ -21,7 +21,7 @@ MARKETPLACE_URL = (
 # Bundled catalogue — works offline if GitHub unreachable
 # Built-in plugin templates — installed locally, no network needed
 BUILTIN_PLUGINS = {
-    'port_monitor': '''"""Port Change Monitor — Mint Scan v8 Plugin"""
+    'port_monitor': '''"""Port Change Monitor — Mint Scan v11.1 Plugin"""
 PLUGIN_META = {'name': 'Port Change Monitor', 'version': '1.0',
                'author': 'Mint Projects', 'description': 'Alerts when open ports change vs baseline.'}
 import json, os
@@ -30,7 +30,7 @@ def on_event(event, data):
     if event == 'scan_complete' and data:
         pass  # compare ports to baseline
 ''',
-    'login_audit': '''"""Login Auditor — Mint Scan v8 Plugin"""
+    'login_audit': '''"""Login Auditor — Mint Scan v11.1 Plugin"""
 PLUGIN_META = {'name': 'Login Auditor', 'version': '1.0',
                'author': 'Mint Projects', 'description': 'Monitors SSH and local logins via journal.'}
 import subprocess, time
@@ -38,7 +38,7 @@ def on_event(event, data):
     if event == 'app_start':
         pass  # start monitoring journal
 ''',
-    'wifi_tracker': '''"""Wi-Fi Network Tracker — Mint Scan v8 Plugin"""
+    'wifi_tracker': '''"""Wi-Fi Network Tracker — Mint Scan v11.1 Plugin"""
 PLUGIN_META = {'name': 'Wi-Fi Tracker', 'version': '1.0',
                'author': 'Mint Projects', 'description': 'Logs all Wi-Fi networks seen over time.'}
 import os, time, json
@@ -180,7 +180,7 @@ class MarketplaceScreen(ctk.CTkFrame):
             target=self._load_catalogue, daemon=True).start(),
             variant='ghost', width=90).pack(side='right', padx=8, pady=8)
         Btn(hdr, '📂 MY PLUGINS',
-            command=lambda: os.system(f'xdg-open "{PLUGIN_DIR}" 2>/dev/null &'),
+            command=self._open_plugin_dir,
             variant='ghost', width=120).pack(side='right', padx=4, pady=8)
 
         body = ScrollableFrame(self)
@@ -221,6 +221,13 @@ class MarketplaceScreen(ctk.CTkFrame):
             fill='x', padx=14, pady=(8, 4))
         self._avail_frame = ctk.CTkFrame(body, fg_color='transparent')
         self._avail_frame.pack(fill='x', padx=14, pady=(0, 14))
+
+    def _open_plugin_dir(self):
+        try:
+            if shutil.which('xdg-open'):
+                subprocess.Popen(['xdg-open', PLUGIN_DIR], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
 
     def _refresh_installed(self):
         for w in self._inst_frame.winfo_children():

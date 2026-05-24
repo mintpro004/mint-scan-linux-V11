@@ -6,7 +6,7 @@ attack pattern analysis, full timeline. For understanding threats only.
 import tkinter as tk
 import customtkinter as ctk
 import subprocess, threading, re, time, os, json
-from widgets import ScrollableFrame, Card, SectionHeader, InfoGrid, ResultBox, Btn, C, MONO, MONO_SM
+from widgets import ScrollableFrame, Card, SectionHeader, InfoGrid, ResultBox, Btn, C, MONO, MONO_SM, FONT
 from utils import run_cmd as _run
 from reports import prompt_save_report
 
@@ -128,6 +128,13 @@ class InvestigateScreen(ctk.CTkFrame):
         self.geo_frame = ctk.CTkFrame(body, fg_color='transparent')
         self.geo_frame.pack(fill='x', padx=14, pady=(0,8))
 
+        # World Map
+        self.map_card = Card(body)
+        self.map_card.pack(fill='x', padx=14, pady=(0,8))
+        self.map_canvas = tk.Canvas(self.map_card, height=180, bg=C['bg'], highlightthickness=0)
+        self.map_canvas.pack(fill='x', padx=8, pady=8)
+        self._draw_empty_map()
+
         # ── Network intelligence ──────────────────────────────
         SectionHeader(body, '04', 'NETWORK INTELLIGENCE').pack(
             fill='x', padx=14, pady=(8,4))
@@ -162,6 +169,39 @@ class InvestigateScreen(ctk.CTkFrame):
             border_width=0)
         self.inv_log.pack(fill='x', padx=8, pady=8)
         self.inv_log.configure(state='disabled')
+
+    def _draw_empty_map(self):
+        self.map_canvas.delete('all')
+        w = self.map_canvas.winfo_width() or 680
+        h = 180
+        # Draw some dummy continent blobs for context
+        blobs = [
+            (0.1, 0.2, 0.2, 0.3), (0.2, 0.1, 0.35, 0.4), # Americas
+            (0.45, 0.1, 0.55, 0.5), (0.5, 0.1, 0.8, 0.3), # Eurasia
+            (0.48, 0.4, 0.6, 0.7), # Africa
+            (0.75, 0.6, 0.85, 0.8) # Australia
+        ]
+        for x1, y1, x2, y2 in blobs:
+            self.map_canvas.create_oval(x1*w, y1*h, x2*w, y2*h, fill=C['sf'], outline=C['br'], width=1)
+        self.map_canvas.create_text(w//2, h-15, text="GLOBAL THREAT MAP (SIMULATED)", font=(FONT, 8), fill=C['mu'])
+
+    def _plot_on_map(self, lat, lon):
+        try:
+            w = self.map_canvas.winfo_width() or 680
+            h = 180
+            # Equirectangular projection (approximate)
+            # lat: -90 to 90 -> h to 0
+            # lon: -180 to 180 -> 0 to w
+            px = ((float(lon) + 180) / 360) * w
+            py = (1.0 - (float(lat) + 90) / 180) * h
+            
+            # Draw pulse
+            r = 8
+            self.map_canvas.create_oval(px-r, py-r, px+r, py+r, outline=C['wn'], width=2, tags='point')
+            self.map_canvas.create_oval(px-2, py-2, px+2, py+2, fill=C['ac'], outline=C['ac'], tags='point')
+            self.map_canvas.create_text(px, py-15, text="TARGET ORIGIN", font=(FONT, 7, 'bold'), fill=C['ac'], tags='point')
+        except:
+            pass
 
     # ── Logging ───────────────────────────────────────────────
 
@@ -642,21 +682,12 @@ class InvestigateScreen(ctk.CTkFrame):
                 command=lambda: self.app._switch_tab('firewall'),
                 variant='blue', width=140).pack(side='left', padx=4)
 
-    def _export_report(self, target, findings, geo, net, analysis):
-        sections = [
-            ("INVESTIGATION SUMMARY", f"Target: {target}\nRisk: {next((a['risk'] for a in analysis if a['type']=='summary'), 'Unknown')}", "INFO"),
-            ("FINDINGS", findings, "WARN"),
-        ]
-        if geo: sections.append(("GEOLOCATION", geo, "INFO"))
-        if net: sections.append(("NETWORK INTEL", net, "INFO"))
-        
-        recs = next((a['items'] for a in analysis if a['type']=='recommendations'), [])
-        if recs: sections.append(("RECOMMENDATIONS", recs, "INFO"))
-        
-        prompt_save_report(self, target, "Threat Investigation", sections)
+        # ── Geolocation Map Update ───────────────────────────
+        self._draw_empty_map()
+        if geo_data and 'lat' in geo_data and geo_data['lat'] != '—':
+            self._plot_on_map(geo_data['lat'], geo_data['lon'])
 
-    # ── Geolocation ───────────────────────────────────────────
-
+        # ── Geolocation Card ─────────────────────────────────
         for w in self.geo_frame.winfo_children():
             w.destroy()
         if geo_data:
@@ -686,7 +717,7 @@ class InvestigateScreen(ctk.CTkFrame):
                         font=('DejaVu Sans Mono',8), text_color=C['mu']
                     ).pack(anchor='w', pady=(4,0))
 
-        # Network intel
+        # ── Network intel ────────────────────────────────────
         for w in self.net_frame.winfo_children():
             w.destroy()
         if net_data.get('traceroute'):
@@ -700,7 +731,7 @@ class InvestigateScreen(ctk.CTkFrame):
                          justify='left', wraplength=700
                          ).pack(anchor='w', padx=10, pady=(0,8))
 
-        # Analysis & recommendations
+        # ── Analysis & recommendations ───────────────────────
         for w in self.analysis_frame.winfo_children():
             w.destroy()
 
@@ -743,6 +774,19 @@ class InvestigateScreen(ctk.CTkFrame):
                       ).pack(fill='x')
 
         self._log("✓ Investigation complete.")
+
+    def _export_report(self, target, findings, geo, net, analysis):
+        sections = [
+            ("INVESTIGATION SUMMARY", f"Target: {target}\nRisk: {next((a['risk'] for a in analysis if a['type']=='summary'), 'Unknown')}", "INFO"),
+            ("FINDINGS", findings, "WARN"),
+        ]
+        if geo: sections.append(("GEOLOCATION", geo, "INFO"))
+        if net: sections.append(("NETWORK INTEL", net, "INFO"))
+        
+        recs = next((a['items'] for a in analysis if a['type']=='recommendations'), [])
+        if recs: sections.append(("RECOMMENDATIONS", recs, "INFO"))
+        
+        prompt_save_report(self, target, "Threat Investigation", sections)
 
     # ── Actions ───────────────────────────────────────────────
 

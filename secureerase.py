@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — Secure Erase Tool
+Mint Scan v11.1 — Secure Erase Tool
 Wipes files/folders using shred (DoD 3-pass) or manual overwrite.
 """
 import tkinter as tk
@@ -169,8 +169,30 @@ class SecureEraseScreen(ctk.CTkFrame):
                               variant='danger', width=200)
         self._erase_btn.pack(pady=12)
 
+        # Wipe Free Space
+        SectionHeader(body, '05', 'WIPE FREE SPACE').pack(
+            fill='x', padx=14, pady=(8, 4))
+        wfc = Card(body)
+        wfc.pack(fill='x', padx=14, pady=(0, 14))
+        ctk.CTkLabel(wfc,
+            text='Overwrite unallocated space to prevent recovery of previously deleted files.',
+            font=MONO_SM, text_color=C['mu']).pack(anchor='w', padx=12, pady=(10, 4))
+        
+        wrow = ctk.CTkFrame(wfc, fg_color='transparent')
+        wrow.pack(fill='x', padx=12, pady=(0, 10))
+        ctk.CTkLabel(wrow, text="DRIVE:", font=MONO_SM, text_color=C['mu']).pack(side='left', padx=(0, 8))
+        
+        # Get mount points
+        mounts = [line.split()[1] for line in subprocess.run(['mount'], capture_output=True, text=True).stdout.splitlines() if line.startswith('/')]
+        mounts = sorted(list(set(mounts)))[:10] # limit to first 10
+        self._mount_var = ctk.StringVar(value=mounts[0] if mounts else "/")
+        ctk.CTkOptionMenu(wrow, variable=self._mount_var, values=mounts, fg_color=C['s2'], button_color=C['br2'], width=120).pack(side='left', padx=8)
+        
+        Btn(wrow, '🛡 WIPE FREE SPACE', command=self._confirm_wipe_free, width=180).pack(side='left', padx=8)
+
+
         # Log
-        SectionHeader(body, '05', 'ERASE LOG').pack(
+        SectionHeader(body, '06', 'ERASE LOG').pack(
             fill='x', padx=14, pady=(8, 4))
         lc = Card(body)
         lc.pack(fill='x', padx=14, pady=(0, 14))
@@ -239,6 +261,59 @@ class SecureEraseScreen(ctk.CTkFrame):
                        {'text': 'Done — select another target.',
                         'text_color': C['ok']})
             self._selected = None
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _confirm_wipe_free(self):
+        mount = self._mount_var.get()
+        popup = ctk.CTkToplevel(self)
+        popup.title('Confirm Wipe Free Space')
+        popup.geometry('440x220')
+        popup.configure(fg_color=C['bg'])
+        popup.lift(); popup.focus_force()
+        ctk.CTkLabel(popup, text='🛡  CONFIPE WIPE FREE SPACE',
+                     font=('DejaVu Sans Mono', 12, 'bold'),
+                     text_color=C['ac']).pack(pady=(20, 8))
+        ctk.CTkLabel(popup,
+            text=f'Drive: {mount}\n\nThis will fill the drive with a temporary file\nto overwrite deleted data. It may take a LONG time.',
+            font=MONO_SM, text_color=C['tx'], justify='center'
+            ).pack(pady=4)
+        br = ctk.CTkFrame(popup, fg_color='transparent')
+        br.pack(pady=16)
+        Btn(br, '✗ CANCEL', command=popup.destroy,
+            variant='ghost', width=100).pack(side='left', padx=8)
+        Btn(br, '🛡 PROCEED', variant='primary', width=100,
+            command=lambda: (popup.destroy(), self._do_wipe_free())
+            ).pack(side='left', padx=8)
+
+    def _do_wipe_free(self):
+        mount = self._mount_var.get()
+        passes = self._pass_var.get()
+        self._ulog(f"Starting FREE SPACE WIPE on {mount} ({passes} passes)...")
+        
+        def _bg():
+            tmp_file = os.path.join(mount, '.mint_scan_wipe.tmp')
+            try:
+                # 1. Fill disk
+                self._ulog(f"Creating large wipe file: {tmp_file}")
+                chunk_size = 1024 * 1024 * 10 # 10MB chunks
+                zero_chunk = b'\x00' * chunk_size
+                with open(tmp_file, 'wb') as f:
+                    while True:
+                        try:
+                            f.write(zero_chunk)
+                        except OSError as e:
+                            if e.errno == 28: # No space left on device
+                                break
+                            raise
+                self._ulog("Disk capacity reached. Now shredding wipe file...")
+                # 2. Shred the file
+                shred_file(tmp_file, passes, self._ulog)
+                self._ulog("✓ Free space wipe complete.")
+            except Exception as e:
+                self._ulog(f"✗ Wipe failed: {e}")
+                if os.path.exists(tmp_file):
+                    os.remove(tmp_file)
+
         threading.Thread(target=_bg, daemon=True).start()
 
     def _ulog(self, msg):

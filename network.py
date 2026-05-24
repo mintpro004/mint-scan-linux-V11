@@ -1,5 +1,5 @@
 """
-Mint Scan v8 — Advanced Network Screen
+Mint Scan v11.1 — Advanced Network Screen
 ANALOG SPEEDOMETER gauges for download/upload, animated ping graph,
 full clipboard Traffic Log, live connection table, public IP panel.
 """
@@ -926,7 +926,7 @@ class NetworkScreen(ctk.CTkFrame):
                 f.write(buf.getvalue())
         else:
             with open(path,'w') as f:
-                f.write(f'# Mint Scan v8 — Traffic Log\n')
+                f.write(f'# Mint Scan v11.1 — Traffic Log\n')
                 f.write(f'# Saved: {time.strftime("%Y-%m-%d %H:%M:%S")}\n')
                 f.write(f'# Lines: {len(txt.splitlines())}\n\n')
                 f.write(txt)

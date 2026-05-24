@@ -96,34 +96,39 @@ class SettingsScreen(ctk.CTkFrame):
 
         self._theme_var = tk.StringVar(value=self.settings.get('theme','dark'))
 
-        # Dark button
-        self._dark_btn = ctk.CTkButton(theme_row,
-            text="🌙  DARK",
-            font=('DejaVu Sans Mono',10,'bold'),
-            width=140, height=40,
-            fg_color=C['br2'],
-            border_color=C['ac'],
-            border_width=2,
-            hover_color=C['br'],
-            text_color=C['ac'],
-            command=lambda: self._set_theme('dark'))
-        self._dark_btn.pack(side='left', padx=6)
+        self._theme_btns = {} # Register for _update_theme_buttons
+        
+        btn_row = ctk.CTkFrame(theme_card, fg_color='transparent')
+        btn_row.pack(fill='x', padx=12, pady=(0,12))
 
-        # Light button
-        self._light_btn = ctk.CTkButton(theme_row,
-            text="☀  LIGHT",
-            font=('DejaVu Sans Mono',10,'bold'),
-            width=140, height=40,
-            fg_color='#e2e8f0',
-            border_color='#94a3b8',
-            border_width=2,
-            hover_color='#cbd5e1',
-            text_color='#1e293b',
-            command=lambda: self._set_theme('light'))
-        self._light_btn.pack(side='left', padx=6)
+        # Theme buttons
+        self._dark_btn = ctk.CTkButton(btn_row, text="🌙 DARK", font=('DejaVu Sans Mono',9,'bold'), width=100, height=34,
+            fg_color=C['br2'] if self._theme_var.get()=='dark' else C['s2'], command=lambda: self._set_theme('dark'))
+        self._dark_btn.pack(side='left', padx=2)
+        self._theme_btns['dark'] = self._dark_btn
+
+        self._light_btn = ctk.CTkButton(btn_row, text="☀ LIGHT", font=('DejaVu Sans Mono',9,'bold'), width=100, height=34,
+            fg_color=C['br2'] if self._theme_var.get()=='light' else C['s2'], command=lambda: self._set_theme('light'))
+        self._light_btn.pack(side='left', padx=2)
+        self._theme_btns['light'] = self._light_btn
+
+        self._nord_btn = ctk.CTkButton(btn_row, text="❄ NORD", font=('DejaVu Sans Mono',9,'bold'), width=100, height=34,
+            fg_color=C['br2'] if self._theme_var.get()=='nord' else C['s2'], command=lambda: self._set_theme('nord'))
+        self._nord_btn.pack(side='left', padx=2)
+        self._theme_btns['nord'] = self._nord_btn
+
+        self._dracula_btn = ctk.CTkButton(btn_row, text="🧛 DRACULA", font=('DejaVu Sans Mono',9,'bold'), width=110, height=34,
+            fg_color=C['br2'] if self._theme_var.get()=='dracula' else C['s2'], command=lambda: self._set_theme('dracula'))
+        self._dracula_btn.pack(side='left', padx=2)
+        self._theme_btns['dracula'] = self._dracula_btn
+
+        self._cyber_btn = ctk.CTkButton(btn_row, text="⚡ CYBER", font=('DejaVu Sans Mono',9,'bold'), width=100, height=34,
+            fg_color=C['br2'] if self._theme_var.get()=='cyberpunk' else C['s2'], command=lambda: self._set_theme('cyberpunk'))
+        self._cyber_btn.pack(side='left', padx=2)
+        self._theme_btns['cyberpunk'] = self._cyber_btn
 
         self._theme_status = ctk.CTkLabel(theme_card,
-            text="Current: DARK theme",
+            text=f"Current: {self._theme_var.get().upper()} theme",
             font=MONO_SM, text_color=C['mu'])
         self._theme_status.pack(anchor='w', padx=12, pady=(0,10))
 
@@ -265,8 +270,40 @@ class SettingsScreen(ctk.CTkFrame):
         tw_grid.columnconfigure(0, weight=1)
         tw_grid.columnconfigure(1, weight=1)
 
+        # ── DEPENDENCIES ──────────────────────────────────────
+        SectionHeader(body, '07', 'DEPENDENCIES').pack(fill='x', padx=14, pady=(8,4))
+        self.dep_card = Card(body)
+        self.dep_card.pack(fill='x', padx=14, pady=(0,8))
+        
+        dep_hdr = ctk.CTkFrame(self.dep_card, fg_color='transparent')
+        dep_hdr.pack(fill='x', padx=12, pady=(10,5))
+        ctk.CTkLabel(dep_hdr, text="SYSTEM TOOLS", font=MONO_SM, text_color=C['mu']).pack(side='left')
+        self.dep_scan_btn = Btn(dep_hdr, "🔍 SCAN", command=self._scan_deps, variant='ghost', width=80, height=26)
+        self.dep_scan_btn.pack(side='right')
+        
+        self.dep_list = ctk.CTkFrame(self.dep_card, fg_color='transparent')
+        self.dep_list.pack(fill='x', padx=12, pady=(0,10))
+        
+        # Initial scan message
+        ctk.CTkLabel(self.dep_list, text="Click SCAN to check for missing system tools", font=MONO_SM, text_color=C['mu']).pack(pady=10)
+
+        # ── MAINTENANCE ───────────────────────────────────────
+        SectionHeader(body, '08', 'MAINTENANCE').pack(fill='x', padx=14, pady=(8,4))
+        main_card = Card(body)
+        main_card.pack(fill='x', padx=14, pady=(0,8))
+        
+        main_row = ctk.CTkFrame(main_card, fg_color='transparent')
+        main_row.pack(fill='x', padx=12, pady=12)
+        
+        Btn(main_row, "📦 OPTIMISE DATABASE", 
+            command=self._run_db_maintenance,
+            variant='ghost', width=200).pack(side='left', padx=4)
+        
+        ctk.CTkLabel(main_row, text="Prunes old data (>30 days) and runs VACUUM", 
+                     font=MONO_SM, text_color=C['mu']).pack(side='left', padx=10)
+
         # ── LIVE PREVIEW ──────────────────────────────────────
-        SectionHeader(body, '07', 'LIVE PREVIEW').pack(fill='x', padx=14, pady=(8,4))
+        SectionHeader(body, '09', 'LIVE PREVIEW').pack(fill='x', padx=14, pady=(8,4))
         self.preview = Card(body)
         self.preview.pack(fill='x', padx=14, pady=(0,8))
         self.prev_title = ctk.CTkLabel(self.preview,
@@ -286,6 +323,64 @@ class SettingsScreen(ctk.CTkFrame):
                                         font=MONO_SM, text_color=C['ok'])
         self.status_lbl.pack(pady=8)
         ctk.CTkLabel(body, text="", height=20).pack()
+
+    def _scan_deps(self):
+        self.dep_scan_btn.configure(state='disabled', text="WAIT...")
+        for w in self.dep_list.winfo_children(): w.destroy()
+        
+        def _do():
+            from utils import get_dependencies_status
+            deps = get_dependencies_status()
+            self._safe_after(0, self._render_deps, deps)
+            
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _render_deps(self, deps):
+        self.dep_scan_btn.configure(state='normal', text="🔍 SCAN")
+        missing = [d for d in deps if not d['found']]
+        
+        for d in deps:
+            row = ctk.CTkFrame(self.dep_list, fg_color='transparent')
+            row.pack(fill='x', pady=1)
+            
+            icon = "✓" if d['found'] else "✗"
+            col = C['ok'] if d['found'] else C['wn']
+            
+            ctk.CTkLabel(row, text=icon, font=MONO_SM, text_color=col, width=20).pack(side='left')
+            ctk.CTkLabel(row, text=d['cmd'].upper(), font=(FONT, 9, 'bold'), text_color=C['tx'], width=100, anchor='w').pack(side='left', padx=5)
+            ctk.CTkLabel(row, text=d['desc'], font=MONO_SM, text_color=C['mu']).pack(side='left', padx=5)
+
+        if missing:
+            Btn(self.dep_list, f"🔧 INSTALL {len(missing)} MISSING TOOLS", 
+                command=self._install_deps, variant='success', height=30).pack(pady=10)
+
+    def _install_deps(self):
+        self.status_lbl.configure(text="Installing dependencies... this may take a few minutes.", text_color=C['ac'])
+        self.dep_scan_btn.configure(state='disabled')
+        
+        def _do():
+            from utils import install_missing_dependencies
+            success, msg = install_missing_dependencies()
+            self._safe_after(0, self._install_done, success, msg)
+            
+        threading.Thread(target=_do, daemon=True).start()
+
+    def _install_done(self, success, msg):
+        self.dep_scan_btn.configure(state='normal')
+        self.status_lbl.configure(
+            text="✓ Installation Complete" if success else f"✗ Failed: {msg[:60]}",
+            text_color=C['ok'] if success else C['wn'])
+        self._scan_deps()
+
+    def _run_db_maintenance(self):
+        self.status_lbl.configure(text="Optimising database...", text_color=C['ac'])
+        def _do():
+            from database import db
+            success, msg = db.maintenance()
+            self._safe_after(0, lambda m=msg, s=success: self.status_lbl.configure(
+                text=f"✓ {m}" if s else f"✗ Error: {m}",
+                text_color=C['ok'] if s else C['wn']))
+        threading.Thread(target=_do, daemon=True).start()
 
     def _run_tweak(self, cmd):
         self.status_lbl.configure(text="Running tweak...", text_color=C['ac'])
@@ -329,29 +424,33 @@ class SettingsScreen(ctk.CTkFrame):
     def _set_theme(self, theme_name):
         self._theme_var.set(theme_name)
         self._update_theme_buttons(theme_name)
-        # Apply immediately for preview
+        # Apply immediately
         acc = self._accent_var.get() if hasattr(self, '_accent_var') else '#00ffe0'
         fs = int(self.font_slider.get()) if hasattr(self, 'font_slider') else 10
         _widgets.apply_theme(theme_name, accent=acc, font_size=fs)
+        
+        # Trigger global refresh
+        if hasattr(self.app, 'refresh_ui'):
+            self.app.refresh_ui()
+            
         self._theme_status.configure(
-            text=f"Current: {'DARK 🌙' if theme_name=='dark' else 'LIGHT ☀'} theme — tap SAVE to keep")
+            text=f"Current: {theme_name.upper()} theme — tap SAVE to keep")
         self.status_lbl.configure(
-            text=f"Theme changed to {theme_name.upper()} — tap SAVE to save",
+            text=f"Theme preview: {theme_name.upper()} applied",
             text_color=_widgets.C['ok'])
 
     def _update_theme_buttons(self, theme):
         try:
             acc = self._accent_var.get() if hasattr(self, '_accent_var') else '#00ffe0'
-            if theme == 'dark':
-                self._dark_btn.configure(border_width=3, border_color=acc)
-                self._light_btn.configure(border_width=1, border_color='#94a3b8')
-            else:
-                self._dark_btn.configure(border_width=1, border_color='#1a3a52')
-                self._light_btn.configure(border_width=3, border_color='#0077cc')
+            for name, btn in self._theme_btns.items():
+                if theme == name:
+                    btn.configure(border_width=3, border_color=acc, fg_color=C['br2'])
+                else:
+                    btn.configure(border_width=1, border_color=C['br'], fg_color=C['s2'])
+            
             self._theme_status.configure(
-                text=f"Current: {'DARK 🌙' if theme=='dark' else 'LIGHT ☀'} theme")
-        except Exception:
-            pass
+                text=f"Current: {theme.upper()} theme")
+        except Exception: pass
 
     def _set_accent(self, colour):
         self._accent_var.set(colour)

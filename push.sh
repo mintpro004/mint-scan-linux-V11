@@ -9,7 +9,7 @@ echo -e "\033[0;36m[ MINT SCAN ]\033[0m Preparing update for GitHub..."
 git add .
 
 # Prompt for commit message or use default
-MSG="v8.3.0: Clipboard Manager, Welcome Screen, Sync Fixes, and VPN Enhancements"
+MSG="v11.1: Clipboard Manager, Welcome Screen, Sync Fixes, and VPN Enhancements"
 if [ -n "$1" ]; then
     MSG="$1"
 fi
