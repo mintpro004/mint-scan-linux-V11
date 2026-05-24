@@ -15,7 +15,7 @@ Mint Scan v11.1 is the definitive security and system utility suite for Linux. E
 For a full walkthrough of features and advanced setup, see: **[GUIDE.md](./GUIDE.md)**
 
 ```bash
-git clone https://github.com/mintpro004/mint-scan-linux-V8.git ~/mint-scan-linux
+git clone https://github.com/mintpro004/mint-scan-linux-V11.git ~/mint-scan-linux
 cd ~/mint-scan-linux
 bash install.sh
 bash run.sh          # Never: sudo bash run.sh

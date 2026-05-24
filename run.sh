@@ -1,6 +1,6 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
-# ║   MINT SCAN v8 — LAUNCHER                                   ║
+# ║   MINT SCAN v11 — LAUNCHER                                  ║
 # ║   Supports: x86_64 · aarch64 · Chromebook · WSL2            ║
 # ╚══════════════════════════════════════════════════════════════╝
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

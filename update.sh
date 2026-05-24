@@ -1,7 +1,7 @@
 #!/bin/bash
 # ╔══════════════════════════════════════════════════════════════╗
 # ║   MINT SCAN v8 — UPDATER  (git pull only)                   ║
-# ║   Repository: github.com/mintpro004/mint-scan-linux-V8      ║
+# ║   Repository: github.com/mintpro004/mint-scan-linux-V11      ║
 # ╚══════════════════════════════════════════════════════════════╝
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 RED='\033[0;31m'; BOLD='\033[1m'; NC='\033[0m'
@@ -10,8 +10,8 @@ cd "$SCRIPT_DIR"
 
 echo -e "${CYAN}${BOLD}"
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║   MINT SCAN v8 — UPDATER                                    ║"
-echo "║   Repository: github.com/mintpro004/mint-scan-linux-V8      ║"
+echo "║   MINT SCAN v11 — UPDATER                                   ║"
+echo "║   Repository: github.com/mintpro004/mint-scan-linux-V11      ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -20,19 +20,19 @@ if [ ! -d "$SCRIPT_DIR/.git" ]; then
     echo -e "${RED}ERROR: Not a git repository.${NC}"
     echo ""
     echo "Mint Scan v11.1 must be installed via git clone:"
-    echo -e "  ${CYAN}git clone https://github.com/mintpro004/mint-scan-linux-V8.git ~/mint-scan-linux${NC}"
+    echo -e "  ${CYAN}git clone https://github.com/mintpro004/mint-scan-linux-V11.git ~/mint-scan-linux${NC}"
     echo -e "  ${CYAN}cd ~/mint-scan-linux && bash install.sh && bash run.sh${NC}"
     exit 1
 fi
 
 # Fix/Configure remote if missing or wrong
-EXPECTED_REMOTE="https://github.com/mintpro004/mint-scan-linux-V8.git"
+EXPECTED_REMOTE="https://github.com/mintpro004/mint-scan-linux-V11.git"
 CURRENT_REMOTE=$(git remote get-url origin 2>/dev/null)
 
 if [ -z "$CURRENT_REMOTE" ]; then
     echo -e "${YELLOW}Remote 'origin' not found. Configuring...${NC}"
     git remote add origin "$EXPECTED_REMOTE"
-elif [ "$CURRENT_REMOTE" != "$EXPECTED_REMOTE" ] && [ "$CURRENT_REMOTE" != "https://github.com/mintpro004/mint-scan-linux-V8" ]; then
+elif [ "$CURRENT_REMOTE" != "$EXPECTED_REMOTE" ] && [ "$CURRENT_REMOTE" != "https://github.com/mintpro004/mint-scan-linux-V11" ]; then
     echo -e "${YELLOW}Remote 'origin' is incorrect ($CURRENT_REMOTE). Fixing...${NC}"
     git remote set-url origin "$EXPECTED_REMOTE"
 fi

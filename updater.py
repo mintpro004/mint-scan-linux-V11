@@ -14,7 +14,7 @@ from logger import get_logger
 log = get_logger('updater')
 
 REPO_OWNER  = 'mintpro004'
-REPO_NAME   = 'mint-scan-linux-V8'
+REPO_NAME   = 'mint-scan-linux-V11'
 REPO_API    = f'https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}'
 CURRENT_VER = '8.3.0'
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
@@ -500,7 +500,7 @@ class UpdaterScreen(ctk.CTkFrame):
         mc.pack(fill='x', padx=14, pady=(0, 14))
         ctk.CTkLabel(mc,
             text='# If installed via git:\n'
-                 'cd ~/mint-scan-linux-V8\n'
+                 'cd ~/mint-scan-linux-V11\n'
                  'bash update.sh\n\n'
                  '# Or manually:\n'
                  'git pull origin main   # or: git pull origin master\n'

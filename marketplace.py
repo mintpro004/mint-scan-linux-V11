@@ -16,7 +16,7 @@ log = get_logger('marketplace')
 
 MARKETPLACE_URL = (
     'https://raw.githubusercontent.com/mintpro004/'
-    'mint-scan-linux-V8/main/plugins/marketplace.json')
+    'mint-scan-linux-V11/main/plugins/marketplace.json')
 
 # Bundled catalogue — works offline if GitHub unreachable
 # Built-in plugin templates — installed locally, no network needed
