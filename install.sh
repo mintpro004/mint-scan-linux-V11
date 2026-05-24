@@ -129,10 +129,16 @@ echo "  ✓ Done"
 # ── [6/9] Verification ──────────────────────────────────────────
 echo "[6/9] Verifying module integrity..."
 FAIL_COUNT=0
+PY_BIN="python3"
+[ -f "venv/bin/python3" ] && PY_BIN="venv/bin/python3"
+
 for pyfile in widgets.py main.py app.py; do
     if [ -f "$pyfile" ]; then
-        python3 -m py_compile "$pyfile" 2>/dev/null || {
+        # Try to compile without writing to pycache to strictly check syntax
+        $PY_BIN -c "import py_compile; py_compile.compile('$pyfile', dfile='$pyfile', doraise=True)" &>/dev/null || {
             echo -e "    ${RED}✗ $pyfile has syntax errors${NC}"
+            # Show actual error for debugging
+            $PY_BIN -m py_compile "$pyfile" 2>&1 | sed 's/^/      /'
             FAIL_COUNT=$((FAIL_COUNT + 1))
         }
     fi
@@ -140,6 +146,7 @@ done
 
 if [ $FAIL_COUNT -gt 0 ]; then
     echo -e "  ${RED}✗ Critical files have errors. Setup aborted.${NC}"
+    echo -e "  ${YELLOW}Hint: Ensure you are using Python 3.9+${NC}"
     exit 1
 fi
 echo "  ✓ Core files OK"
