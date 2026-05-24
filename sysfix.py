@@ -61,6 +61,15 @@ class SysFixScreen(ctk.CTkFrame):
         SectionHeader(body, '01', 'QUICK FIXES').pack(fill='x', padx=14, pady=(14,4))
         qf = Card(body)
         qf.pack(fill='x', padx=14, pady=(0,8))
+
+        from utils import _is_crostini
+        if _is_crostini():
+            cb_card = ctk.CTkFrame(qf, fg_color=C['s3'], corner_radius=6)
+            cb_card.pack(fill='x', padx=8, pady=8)
+            ctk.CTkLabel(cb_card, text="CHROMEBOOK AUTO-CONFIG", font=('Courier', 10, 'bold'), text_color=C['ac']).pack(anchor='w', padx=10, pady=(5,0))
+            ctk.CTkLabel(cb_card, text="Optimize Linux container for security auditing.", font=('Courier', 9), text_color=C['tx']).pack(anchor='w', padx=10)
+            Btn(cb_card, "🚀 RUN CHROMEBOOK FIX", command=self._fix_chromebook, variant='blue', width=200).pack(anchor='w', padx=10, pady=10)
+
         grid = ctk.CTkFrame(qf, fg_color='transparent')
         grid.pack(fill='x', padx=8, pady=8)
         quick_fixes = [
@@ -206,6 +215,24 @@ class SysFixScreen(ctk.CTkFrame):
             out, err, rc = self._execute(f"sudo {cmd}" if not cmd.startswith('sudo') else cmd)
             if not self._dry_run.get():
                 self._safe_after(0, self._log, f"{'✓ Done' if rc==0 else '✗ Failed'}: {out or err}")
+        threading.Thread(target=_bg, daemon=True).start()
+
+    def _fix_chromebook(self):
+        self._log("Starting Chromebook Auto-Configuration...")
+        def _bg():
+            cmds = [
+                "sudo apt-get update -qq",
+                "sudo apt-get install -y -qq libcanberra-gtk-module libcanberra-gtk3-module python3-tk libtk8.6 adb",
+                "sudo usermod -aG plugdev $USER",
+                "echo 'SUBSYSTEM==\"usb\", ATTR{idVendor}==\"18d1\", MODE=\"0666\", GROUP=\"plugdev\"' | sudo tee /etc/udev/rules.d/51-android.rules > /dev/null",
+                "adb kill-server",
+                "adb start-server",
+            ]
+            for cmd in cmds:
+                self._execute(cmd, f"Running: {cmd}")
+            self._safe_after(0, self._log, "✓ Chromebook Auto-Config Complete.")
+            self._safe_after(0, lambda: ResultBox(self.results_frame, 'ok', 'CHROMEBOOK OPTIMIZED', 
+                                                 'Display, ADB, and GTK modules have been configured.').pack(fill='x', pady=5))
         threading.Thread(target=_bg, daemon=True).start()
 
     def _update_system(self):

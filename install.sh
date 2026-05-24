@@ -20,13 +20,21 @@ echo -e "${NC}"
 echo "[0/9] Detecting system environment..."
 IS_AARCH64=false; [[ "$(uname -m)" == "aarch64" || "$(uname -m)" == "arm64" ]] && IS_AARCH64=true
 IS_CHROMEBOOK=false; [ -f /proc/version ] && grep -qi "cros\|chrome" /proc/version 2>/dev/null && IS_CHROMEBOOK=true
+# Additional Chromebook detection
+if [ -f /dev/.cros_milestone ] || [ -d /run/chrome ]; then IS_CHROMEBOOK=true; fi
 
 PM=""
 if command -v apt-get &>/dev/null; then PM="apt"; elif command -v dnf &>/dev/null; then PM="dnf"; elif command -v pacman &>/dev/null; then PM="pacman"; fi
 
 echo "  ✓ Architecture: $(uname -m)"
 echo "  ✓ Package Manager: ${PM:-"Not detected"}"
-$IS_CHROMEBOOK && echo "  ✓ Chromebook detected"
+if $IS_CHROMEBOOK; then
+    echo "  ✓ Chromebook detected (Crostini)"
+    # Ensure sudo works without password (default on Crostini)
+    if sudo -n true 2>/dev/null; then
+        echo "  ✓ Sudo: Passwordless (Automated)"
+    fi
+fi
 
 # ── [1/9] Terminal & Visual Configuration ────────────────────────
 echo "[1/9] Configuring Terminal Visuals (True Color)..."
@@ -44,9 +52,9 @@ echo "  ✓ Current session updated"
 
 # ── [2/9] System Dependencies ────────────────────────────────────
 echo "[2/9] Installing system packages..."
-PKGS_DEB="python3 python3-pip python3-tk python3-dev python3-venv git ripgrep adb nmap ufw x11-utils xdotool net-tools dbus"
-PKGS_RPM="python3 python3-pip python3-tkinter python3-devel git ripgrep adb nmap ufw xorg-x11-utils xdotool net-tools dbus"
-PKGS_ARCH="python python-pip tk git ripgrep android-tools nmap ufw xorg-xdpyinfo xdotool net-tools dbus"
+PKGS_DEB="python3 python3-pip python3-tk python3-dev python3-venv git ripgrep adb nmap ufw x11-utils xdotool net-tools dbus libcanberra-gtk-module libcanberra-gtk3-module"
+PKGS_RPM="python3 python3-pip python3-tkinter python3-devel git ripgrep adb nmap ufw xorg-x11-utils xdotool net-tools dbus libcanberra-gtk2 libcanberra-gtk3"
+PKGS_ARCH="python python-pip tk git ripgrep android-tools nmap ufw xorg-xdpyinfo xdotool net-tools dbus libcanberra"
 
 case $PM in
     apt)
@@ -54,6 +62,11 @@ case $PM in
         sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $PKGS_DEB
         if $IS_AARCH64; then
             sudo apt-get install -y -qq python3-pil python3-pil.imagetk libtk8.6 libglib2.0-0
+        fi
+        if $IS_CHROMEBOOK; then
+             # Fix for ADB on Chromebook: enable connection to host
+             sudo usermod -aG plugdev $USER
+             echo 'SUBSYSTEM=="usb", ATTR{idVendor}=="18d1", MODE="0666", GROUP="plugdev"' | sudo tee /etc/udev/rules.d/51-android.rules > /dev/null
         fi
         ;;
     dnf)

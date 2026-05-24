@@ -25,6 +25,12 @@ if [ -n "$WAYLAND_DISPLAY" ] && [ -z "$DISPLAY" ]; then
     export QT_QPA_PLATFORM=xcb
 fi
 
+# Chromebook/Crostini: DISPLAY is usually :0 but sometimes missing in env
+if [ -f /dev/.cros_milestone ] && [ -z "$DISPLAY" ]; then
+    export DISPLAY=:0
+    echo -e "${YELLOW}[ MINT SCAN ]${NC} Chromebook detected — forced DISPLAY=:0"
+fi
+
 # WSL2: set DISPLAY if not set
 if [ -f /proc/sys/fs/binfmt_misc/WSLInterop ] && [ -z "$DISPLAY" ]; then
     echo -e "${YELLOW}[ MINT SCAN ]${NC} WSL2 detected — setting DISPLAY=:0"
@@ -38,6 +44,7 @@ if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
         export DISPLAY=:0
     else
         echo -e "${RED}[ MINT SCAN ]${NC} No display found."
+        echo "  If you're on a Chromebook, ensure Linux has access to the GPU/Display."
         echo "  If you're on Wayland:  export DISPLAY=:0 && bash run.sh"
         echo "  If you're headless:    Xvfb :0 -screen 0 1280x800x24 &"
         echo "                         export DISPLAY=:0 && bash run.sh"

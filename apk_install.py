@@ -61,7 +61,7 @@ class ApkScreen(ctk.CTkFrame):
         body = self.scroll
 
         # ── ADB status ───────────────────────────────────────
-        SectionHeader(body,'01','SETUP').pack(fill='x', padx=14, pady=(14,4))
+        SectionHeader(body,'01', 'SETUP').pack(fill='x', padx=14, pady=(14,4))
         setup = Card(body, accent=C['bl'])
         setup.pack(fill='x', padx=14, pady=(0,8))
 
@@ -78,6 +78,17 @@ class ApkScreen(ctk.CTkFrame):
                 command=lambda: install_adb(self, on_done=lambda: threading.Thread(
                     target=self._detect, daemon=True).start()),
                 variant='primary', width=180).pack(anchor='w', padx=12, pady=(0,10))
+
+        # Chromebook ADB connect helper
+        from utils import _is_crostini
+        if _is_crostini():
+            cb_adb = ctk.CTkFrame(setup, fg_color=C['s3'], corner_radius=6)
+            cb_adb.pack(fill='x', padx=8, pady=4)
+            ctk.CTkLabel(cb_adb, text="CHROMEBOOK DETECTED", font=('Courier', 10, 'bold'), text_color=C['ac']).pack(anchor='w', padx=10, pady=(5,0))
+            ctk.CTkLabel(cb_adb, text="To install to this Chromebook, enable 'ADB Debugging' in Settings → Linux → Develop Android Apps.",
+                         font=('Courier', 9), text_color=C['tx'], justify='left').pack(anchor='w', padx=10)
+            Btn(cb_adb, "🔗 CONNECT TO CHROMEBOOK HOST",
+                command=self._connect_chromebook_adb, variant='blue', width=220).pack(anchor='w', padx=10, pady=10)
 
         ctk.CTkLabel(setup,
             text="Phone setup:\n"
@@ -162,6 +173,17 @@ class ApkScreen(ctk.CTkFrame):
         ctk.CTkLabel(body, text="", height=16).pack()
 
     # ── Helpers ───────────────────────────────────────────────
+
+    def _connect_chromebook_adb(self):
+        self._log("Attempting to connect to Chromebook host ADB (100.115.92.2)...")
+        def _bg():
+            # First kill server to be safe
+            _r("adb kill-server")
+            time.sleep(1)
+            out, err, rc = _r("adb connect 100.115.92.2:5555")
+            self._log(f"ADB: {out or err}")
+            self._detect()
+        threading.Thread(target=_bg, daemon=True).start()
 
     def _log(self, msg):
         def _do():
